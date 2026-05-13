@@ -41,9 +41,12 @@ Measured on an M-series MacBook Pro:
 ## Install (from the .pkg)
 
 1. Download `ClaudeStatus.pkg` from the [Releases](https://github.com/Rorogogogo/ClaudeStatus/releases) page.
-2. Right-click → **Open** (since the package isn't signed with a paid Apple Developer ID, double-clicking will be blocked by Gatekeeper).
-3. Walk through the macOS Installer.
-4. **Restart any running Claude Code session.** Hooks only load at session start.
+2. Double-click. macOS will show "ClaudeStatus.pkg cannot be opened because it is from an unidentified developer."
+3. Open **System Settings → Privacy & Security**, scroll to the message about ClaudeStatus, click **Open Anyway**.
+4. Walk through the macOS Installer.
+5. **Restart any running Claude Code session.** Hooks only load at session start.
+
+> The package is ad-hoc signed (free) but not notarized (requires a paid Apple Developer account). That's why you need the one-time "Open Anyway" step.
 
 The installer's postinstall script will:
 

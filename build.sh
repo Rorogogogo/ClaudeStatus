@@ -66,6 +66,12 @@ cp "$ROOT/scripts/postinstall" "$BUILD/scripts/postinstall"
 chmod +x "$BUILD/scripts/postinstall"
 
 echo "[5/5] Building .pkg..."
+# Ad-hoc sign the .app first so the embedded binary has a code signature.
+# This changes the macOS warning from "Apple could not verify" (hard block)
+# to the regular "unidentified developer" message that has an
+# "Open Anyway" button in Privacy & Security.
+codesign --force --deep --sign - "$APP_PATH"
+
 pkgbuild \
   --root "$PKG_ROOT" \
   --scripts "$BUILD/scripts" \
@@ -73,6 +79,9 @@ pkgbuild \
   --install-location "/" \
   --version "$VERSION" \
   "$BUILD/$APP_NAME.pkg"
+
+# Ad-hoc sign the .pkg itself
+codesign --force --sign - "$BUILD/$APP_NAME.pkg" 2>/dev/null || true
 
 echo ""
 echo "Done."
