@@ -8,16 +8,14 @@ Built as a lightweight alternative to heavier "dynamic island for Claude" tools.
 
 ## Why this exists
 
-| | Vibe Notch (reference) | **ClaudeStatus** |
-|---|---|---|
-| Idle CPU | ~8% | **0.1%** |
-| RAM (RSS) | ~145 MB | **~29 MB** |
-| Binary size | ~30 MB+ | **~180 KB** |
-| Update mechanism | per-frame SwiftUI relayout | event-driven (`kqueue`) |
-| Source LOC | ~10,000 lines Swift | **~200 lines Swift** |
-| Click-to-expand UI | yes (and laggy) | no — passive indicator |
+A passive, glance-and-go indicator. No clickable UI, no chat history, no background animations spinning at 60 Hz — just a tiny dot that tells you whether the agent is working, waiting on you, or idle.
 
-If you want the full clickable Dynamic Island with chat history etc., use Vibe Notch. If you just want to glance at your notch and know what Claude is doing without the agent burning a battery cell, this is the thing.
+Measured on an M-series MacBook Pro:
+
+- **0.1 % idle CPU** — the only thing running between events is a 250 ms `stat()` poll
+- **~29 MB RSS** — single native binary, no framework runtime overhead
+- **~180 KB binary** — ~200 lines of Swift, links against the system AppKit / SwiftUI
+- **Event-driven** via `kqueue` (`DispatchSource.makeFileSystemObjectSource`), not per-frame redraws
 
 ## What it shows
 
@@ -115,7 +113,3 @@ Then remove ClaudeStatus's hook entries from `~/.claude/settings.json` — they 
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
-## Credits
-
-- Notch shape geometry and the crab icon concept inspired by [farouqaldori/vibe-notch](https://github.com/farouqaldori/vibe-notch) (Apache 2.0).
