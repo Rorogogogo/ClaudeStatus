@@ -1,0 +1,124 @@
+#!/bin/bash
+# ClaudeStatus postinstall.
+#
+# macOS Installer runs this as root after copying /Applications/ClaudeStatus.app.
+# Responsibilities:
+#   1. Install play.sh into the installing user's ~/.claude/sounds/peon-ping/
+#   2. Merge hook entries into ~/.claude/settings.json (idempotent)
+#   3. Write a LaunchAgent plist pointed at the user's binary path
+#   4. Load the LaunchAgent so the app starts now and on every login
+#
+# Re-running the installer is safe: hooks are merged (not duplicated) and
+# the LaunchAgent is reloaded.
+
+set -eu
+
+# Discover the user actually doing the install (not root)
+TARGET_USER="$(stat -f %Su /dev/console)"
+if [ -z "$TARGET_USER" ] || [ "$TARGET_USER" = "root" ]; then
+  echo "postinstall: could not resolve target user (got '$TARGET_USER')" >&2
+  exit 1
+fi
+TARGET_HOME="$(dscl . -read /Users/"$TARGET_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
+[ -z "$TARGET_HOME" ] && TARGET_HOME="/Users/$TARGET_USER"
+
+CLAUDE_DIR="$TARGET_HOME/.claude"
+HOOK_DIR="$CLAUDE_DIR/sounds/peon-ping"
+STATE_DIR="$CLAUDE_DIR/state"
+SETTINGS_FILE="$CLAUDE_DIR/settings.json"
+PLAY_SH="$HOOK_DIR/play.sh"
+LAUNCH_AGENT_DIR="$TARGET_HOME/Library/LaunchAgents"
+LAUNCH_AGENT_PLIST="$LAUNCH_AGENT_DIR/com.claudestatus.app.plist"
+APP_BIN="/Applications/ClaudeStatus.app/Contents/MacOS/ClaudeStatus"
+
+echo "postinstall: target user=$TARGET_USER home=$TARGET_HOME"
+
+# 1. Install play.sh
+mkdir -p "$HOOK_DIR" "$STATE_DIR"
+cp "/Applications/ClaudeStatus.app/Contents/Resources/play.sh" "$PLAY_SH"
+chmod +x "$PLAY_SH"
+
+# 2. Merge hook entries into settings.json (idempotent — replaces any existing
+#    ClaudeStatus entries, preserves everything else).
+mkdir -p "$CLAUDE_DIR"
+[ ! -f "$SETTINGS_FILE" ] && echo '{}' > "$SETTINGS_FILE"
+
+PLAY_SH_FOR_PY="$PLAY_SH" python3 - "$SETTINGS_FILE" <<'PYEOF'
+import json, os, sys
+
+path = sys.argv[1]
+play_sh = os.environ["PLAY_SH_FOR_PY"]
+
+with open(path) as f:
+    try:
+        data = json.load(f)
+    except json.JSONDecodeError:
+        data = {}
+
+hooks = data.setdefault("hooks", {})
+
+# Hook events ClaudeStatus uses, mapped to the play.sh arg they pass.
+events = {
+    "SessionStart":      "start",
+    "UserPromptSubmit":  "working",
+    "PreToolUse":        "working",
+    "PostToolUse":       "working",
+    "PostToolUseFailure":"working",
+    "Stop":              "complete",
+    "StopFailure":       "complete",
+    "Notification":      "input",
+    "PermissionRequest": "input",
+}
+
+for event, arg in events.items():
+    desired_command = f"{play_sh} {arg}"
+    existing = hooks.get(event, [])
+    # Drop any existing ClaudeStatus entries (anything pointing at play.sh)
+    filtered = []
+    for group in existing:
+        kept_hooks = [h for h in group.get("hooks", []) if "claude/sounds/peon-ping/play.sh" not in h.get("command", "")]
+        if kept_hooks:
+            new_group = {k: v for k, v in group.items() if k != "hooks"}
+            new_group["hooks"] = kept_hooks
+            filtered.append(new_group)
+    # Append our entry
+    entry = {"hooks": [{"type": "command", "command": desired_command}]}
+    if event in ("PermissionRequest", "PreToolUse", "PostToolUse", "PostToolUseFailure"):
+        entry["matcher"] = "*"
+    filtered.append(entry)
+    hooks[event] = filtered
+
+with open(path, "w") as f:
+    json.dump(data, f, indent=2)
+PYEOF
+
+# 3. LaunchAgent plist
+mkdir -p "$LAUNCH_AGENT_DIR"
+cat > "$LAUNCH_AGENT_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.claudestatus.app</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$APP_BIN</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>
+EOF
+
+# 4. Fix ownership of everything we wrote to the user's home
+chown -R "$TARGET_USER" "$CLAUDE_DIR" "$LAUNCH_AGENT_PLIST"
+
+# 5. Load (or reload) the LaunchAgent as the target user
+UID_NUM="$(id -u "$TARGET_USER")"
+sudo -u "$TARGET_USER" launchctl bootout "gui/$UID_NUM/com.claudestatus.app" 2>/dev/null || true
+sudo -u "$TARGET_USER" launchctl bootstrap "gui/$UID_NUM" "$LAUNCH_AGENT_PLIST" || \
+  sudo -u "$TARGET_USER" launchctl load "$LAUNCH_AGENT_PLIST" || true
+
+echo "postinstall: done. Restart any running Claude Code session for hooks to take effect."
+exit 0
