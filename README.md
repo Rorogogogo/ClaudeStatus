@@ -4,6 +4,8 @@ A tiny, native macOS status indicator for [Claude Code](https://docs.claude.com/
 
 Built as a lightweight alternative to heavier "dynamic island for Claude" tools. Single Swift binary, no Electron, no Python, no background watchers spinning at 60Hz.
 
+### [⬇️ Download ClaudeStatus.pkg (v1.0.0)](https://github.com/Rorogogogo/ClaudeStatus/releases/latest/download/ClaudeStatus.pkg)
+
 ## Why this exists
 
 | | Vibe Notch (reference) | **ClaudeStatus** |
