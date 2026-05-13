@@ -33,9 +33,11 @@ APP_BIN="/Applications/ClaudeStatus.app/Contents/MacOS/ClaudeStatus"
 
 echo "postinstall: target user=$TARGET_USER home=$TARGET_HOME"
 
-# 1. Install play.sh
+# 1. Install play.sh — copy from the script bundle's own directory,
+#    which is the working dir for pkg postinstall scripts.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$HOOK_DIR" "$STATE_DIR"
-cp "/Applications/ClaudeStatus.app/Contents/Resources/play.sh" "$PLAY_SH"
+cp "$SCRIPT_DIR/play.sh" "$PLAY_SH"
 chmod +x "$PLAY_SH"
 
 # 2. Merge hook entries into settings.json (idempotent — replaces any existing

@@ -51,29 +51,34 @@ cat > "$APP_PATH/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-echo "[4/5] Staging postinstall and play.sh into pkg payload..."
-# play.sh ships inside the .app's Resources so the postinstall can copy it
-# into the user's home directory.
+echo "[4/5] Staging postinstall + play.sh into pkg scripts dir..."
+# Keep a copy in the .app Resources/ for users who want to inspect it.
 cp "$ROOT/play.sh" "$APP_PATH/Contents/Resources/play.sh"
 chmod +x "$APP_PATH/Contents/Resources/play.sh"
 
-# Strip quarantine attribute so the locally-built .app doesn't trip Gatekeeper
-# for the person doing the build.
+# Strip quarantine on the locally-built .app
 xattr -cr "$APP_PATH" 2>/dev/null || true
 
+# The pkg's scripts dir is the postinstall's working directory at install time,
+# so anything we drop here is reachable via $PWD/<name> from postinstall.
 mkdir -p "$BUILD/scripts"
 cp "$ROOT/scripts/postinstall" "$BUILD/scripts/postinstall"
-chmod +x "$BUILD/scripts/postinstall"
+cp "$ROOT/play.sh" "$BUILD/scripts/play.sh"
+chmod +x "$BUILD/scripts/postinstall" "$BUILD/scripts/play.sh"
 
 echo "[5/5] Building .pkg..."
-# Ad-hoc sign the .app first so the embedded binary has a code signature.
-# This changes the macOS warning from "Apple could not verify" (hard block)
-# to the regular "unidentified developer" message that has an
-# "Open Anyway" button in Privacy & Security.
 codesign --force --deep --sign - "$APP_PATH"
+
+# Generate a component plist so we can disable bundle relocation
+# (otherwise macOS Installer may write the .app to wherever an existing
+# copy lives, instead of /Applications).
+COMPONENT_PLIST="$BUILD/component.plist"
+pkgbuild --analyze --root "$PKG_ROOT" "$COMPONENT_PLIST"
+/usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$COMPONENT_PLIST" 2>/dev/null || true
 
 pkgbuild \
   --root "$PKG_ROOT" \
+  --component-plist "$COMPONENT_PLIST" \
   --scripts "$BUILD/scripts" \
   --identifier "$IDENTIFIER" \
   --install-location "/" \
