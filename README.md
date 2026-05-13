@@ -113,3 +113,7 @@ Then remove ClaudeStatus's hook entries from `~/.claude/settings.json` — they 
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Credits
+
+Notch shape geometry and the crab icon concept inspired by [farouqaldori/vibe-notch](https://github.com/farouqaldori/vibe-notch) (Apache 2.0).
