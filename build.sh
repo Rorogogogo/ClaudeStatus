@@ -22,12 +22,16 @@ APP_PATH="$PKG_ROOT/Applications/$APP_NAME.app"
 rm -rf "$BUILD"
 mkdir -p "$BUILD" "$PKG_ROOT/Applications" "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
 
-echo "[1/4] Compiling main.swift..."
+echo "[1/5] Generating icons..."
+"$ROOT/scripts/build-icons.sh"
+cp "$BUILD/icons/AppIcon.icns" "$APP_PATH/Contents/Resources/AppIcon.icns"
+
+echo "[2/5] Compiling main.swift..."
 swiftc -O -target arm64-apple-macos14 \
   -o "$APP_PATH/Contents/MacOS/$APP_NAME" \
   "$ROOT/main.swift"
 
-echo "[2/4] Writing Info.plist..."
+echo "[3/5] Writing Info.plist..."
 cat > "$APP_PATH/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -39,6 +43,7 @@ cat > "$APP_PATH/Contents/Info.plist" <<EOF
   <key>CFBundleVersion</key><string>$VERSION</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSUIElement</key><true/>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
@@ -46,7 +51,7 @@ cat > "$APP_PATH/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-echo "[3/4] Staging postinstall and play.sh into pkg payload..."
+echo "[4/5] Staging postinstall and play.sh into pkg payload..."
 # play.sh ships inside the .app's Resources so the postinstall can copy it
 # into the user's home directory.
 cp "$ROOT/play.sh" "$APP_PATH/Contents/Resources/play.sh"
@@ -60,7 +65,7 @@ mkdir -p "$BUILD/scripts"
 cp "$ROOT/scripts/postinstall" "$BUILD/scripts/postinstall"
 chmod +x "$BUILD/scripts/postinstall"
 
-echo "[4/4] Building .pkg..."
+echo "[5/5] Building .pkg..."
 pkgbuild \
   --root "$PKG_ROOT" \
   --scripts "$BUILD/scripts" \

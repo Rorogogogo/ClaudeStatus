@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" width="128" height="128" alt="ClaudeStatus logo" />
+</p>
+
 # ClaudeStatus
 
 A tiny, native macOS status indicator for [Claude Code](https://docs.claude.com/en/docs/claude-code) — sits next to your camera in the notch and turns 🟢 / 🟡 / ⚪ as the agent works / waits for you / goes idle.
