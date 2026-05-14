@@ -4,7 +4,7 @@
 
 # Notchy
 
-A tiny, native macOS status indicator for [Claude Code](https://docs.claude.com/en/docs/claude-code) — sits next to your camera in the notch, turns 🟢 / 🟡 / ⚪ as the agent works / waits / idles, and unfolds on hover to show live 5h and weekly usage straight from `/usage`.
+A tiny, native macOS status indicator for [Claude Code](https://docs.claude.com/en/docs/claude-code) and Codex — sits next to your camera in the notch, turns 🟢 / 🟡 / ⚪ as the agent works / waits / idles, and unfolds on hover to show live 5h and weekly Claude Code usage straight from `/usage`. When both agents are configured, collapsed mode shows whichever agent updated most recently.
 
 Built as a lightweight alternative to heavier "Dynamic Island for Claude" tools. Single Swift binary, no Electron, no Python, no background watchers spinning at 60 Hz.
 
@@ -33,7 +33,7 @@ Measured on an M-series MacBook Pro:
   - **5h block** usage with a 16-segment bar and reset countdown
   - **This week** usage with a 16-segment bar and reset countdown
   - Current project + status, with a one-click quit button
-- Hides itself completely after 10 minutes of no activity, reappears the instant any Claude Code hook fires.
+- Hides itself completely after 10 minutes of no activity, reappears the instant any configured Claude Code or Codex agent hook fires.
 
 ## Live usage data, exactly matching `/usage`
 
@@ -56,7 +56,7 @@ Numbers refresh on every statusline render (i.e. while a TUI is active). When no
 
 - macOS 14 (Sonoma) or later
 - A MacBook with a notch (M-series 14"/16" Pro, M3 Air, etc.)
-- Claude Code installed
+- Claude Code and/or Codex installed
 - `jq` on `PATH` (preinstalled on most dev machines; `brew install jq` if missing)
 - For building from source: Xcode Command Line Tools (`xcode-select --install`)
 
@@ -66,7 +66,7 @@ Numbers refresh on every statusline render (i.e. while a TUI is active). When no
 2. Double-click. macOS will show "Notchy.pkg cannot be opened because it is from an unidentified developer."
 3. Open **System Settings → Privacy & Security**, scroll to the message about Notchy, click **Open Anyway**.
 4. Walk through the macOS Installer.
-5. **Restart any running Claude Code session.** Hooks and the statusline command only load at session start.
+5. **Restart any running Claude Code and/or Codex CLI sessions.** Hooks and the statusline command only load at session start.
 
 > The package is ad-hoc signed (free) but not notarized (requires a paid Apple Developer account). That's why you need the one-time "Open Anyway" step.
 
@@ -74,7 +74,10 @@ The installer's postinstall script will:
 
 - Copy the app to `/Applications/Notchy.app`
 - Install scripts to `~/.claude/notchy/` (`play.sh` for status hooks, `statusline.sh` for live usage)
+- Install Codex hook script to `~/.codex/notchy/play.sh`
 - Merge Claude Code hook entries into `~/.claude/settings.json` (existing hooks preserved)
+- Enable Codex lifecycle hooks in `~/.codex/config.toml`
+- Merge Notchy Codex hook entries into `~/.codex/hooks.json`
 - Append a marked writer block to your existing `~/.claude/statusline-command.sh`, or register a minimal one if you don't have a statusline configured
 - Write a LaunchAgent at `~/Library/LaunchAgents/com.notchy.app.plist`
 - Start the app immediately and on every login
@@ -96,18 +99,20 @@ Outputs:
 
 ## How it works
 
-Four pieces:
+Five pieces:
 
 1. **`play.sh`** — invoked by Claude Code hook events. Reads the hook payload from stdin, writes `<status>\t<unix_ts>\t<project_name>\n` to `~/.claude/state/status`. ~20 ms per invocation.
 
 2. **Statusline writer** — a 10-line block injected into your `~/.claude/statusline-command.sh`. Each statusline render, it pulls `rate_limits` from the JSON Claude Code piped to stdin and writes `<block_pct>\t<block_reset>\t<weekly_pct>\t<weekly_reset>\n` to `~/.claude/state/usage`. Runs in `&` background so your statusline render isn't blocked.
 
-3. **`~/.claude/state/{status,usage}`** — two single-line text files. Authoritative source of truth for the app.
+3. **`~/.claude/state/{status,usage}`** — two single-line text files for Claude Code status and usage. Claude usage is the only usage feed Notchy shows today.
 
-4. **`Notchy.app`** — a long-running native macOS app:
+4. **`~/.codex/notchy/play.sh`** — invoked by Codex lifecycle hooks. Reads the hook payload from stdin and writes Codex status updates to `~/.codex/notchy/status`.
+
+5. **`Notchy.app`** — a long-running native macOS app:
    - Floating `NSPanel` over the physical notch, level above the menu bar
    - Notch-shaped pill drawn with a custom `Shape` (top corners 6pt inward, bottom 14pt outward when collapsed, 22pt when expanded — same curves as the iPhone Dynamic Island)
-   - File-watches both state files with `DispatchSource.makeFileSystemObjectSource` (kqueue under the hood). Re-renders only when the kernel fires `VNODE_WRITE`.
+   - File-watches Claude Code status, Claude Code usage, and Codex status with `DispatchSource.makeFileSystemObjectSource` (kqueue under the hood). Re-renders only when the kernel fires `VNODE_WRITE`.
    - Hover detection constrained to the visible pill shape via `.contentShape(NotchShape(...))`, so transparent areas around the pill don't block clicks to apps below.
    - Spring-animated expansion: ~0.32 s response, 0.78 damping.
    - Auto-expires `waiting` → `idle` after 3 s (see [Caveats](#caveats)).
@@ -130,8 +135,10 @@ Four pieces:
 
 - **No hook fires when the user denies a permission prompt** ([per the docs](https://docs.claude.com/en/docs/claude-code/hooks)). Notchy handles this by auto-expiring `waiting` → `idle` after 3 seconds with no further events.
 - **Live usage only refreshes while a TUI is active.** Anthropic only sends `rate_limits` in the statusline JSON during an interactive session. When no `claude` TUI is open, the bars freeze at the last known values until the next render.
+- **Codex usage bars are not shown yet.** Codex lifecycle hooks provide status updates, but Codex does not expose the same statusline `rate_limits` feed that Claude Code provides.
 - **`rate_limits` only appears after the first API response** in a session. Open a fresh `claude` TUI without sending anything, and the bars stay on whatever the previous render left.
 - **Hooks load at session start.** After installing (or reconfiguring), restart any running Claude Code session.
+- **Codex hooks require a restart.** Restart any running Codex CLI session after installing or reconfiguring Notchy.
 - **First-launch Gatekeeper warning.** The `.pkg` isn't notarized — Privacy & Security → "Open Anyway" the first time.
 - **Notch-only.** Older / non-notch displays still get a pill at the top center, but it looks less like a natural notch extension.
 
@@ -142,9 +149,12 @@ launchctl bootout "gui/$(id -u)/com.notchy.app" 2>/dev/null
 rm -rf /Applications/Notchy.app
 rm -f ~/Library/LaunchAgents/com.notchy.app.plist
 rm -rf ~/.claude/notchy
+rm -rf ~/.codex/notchy
 ```
 
 Then strip the writer block from `~/.claude/statusline-command.sh` (look for the `# notchy-writer-begin` … `# notchy-writer-end` markers) and remove the Notchy hook entries from `~/.claude/settings.json` (they all reference `~/.claude/notchy/play.sh`).
+
+For Codex, remove the Notchy hook entries from `~/.codex/hooks.json` (they reference `~/.codex/notchy/play.sh`). The `codex_hooks = true` setting in `~/.codex/config.toml` can be left enabled if you use other Codex hooks, or removed if Notchy was the only reason it was enabled.
 
 ## License
 
