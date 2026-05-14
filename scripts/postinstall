@@ -27,6 +27,11 @@ STATE_DIR="$CLAUDE_DIR/state"
 SETTINGS_FILE="$CLAUDE_DIR/settings.json"
 PLAY_SH="$NOTCHY_DIR/play.sh"
 NOTCHY_STATUSLINE="$NOTCHY_DIR/statusline.sh"
+CODEX_DIR="$TARGET_HOME/.codex"
+CODEX_NOTCHY_DIR="$CODEX_DIR/notchy"
+CODEX_CONFIG_FILE="$CODEX_DIR/config.toml"
+CODEX_HOOKS_FILE="$CODEX_DIR/hooks.json"
+CODEX_PLAY_SH="$CODEX_NOTCHY_DIR/play.sh"
 LAUNCH_AGENT_DIR="$TARGET_HOME/Library/LaunchAgents"
 APP_LAUNCH_AGENT="$LAUNCH_AGENT_DIR/com.notchy.app.plist"
 APP_BIN="/Applications/Notchy.app/Contents/MacOS/Notchy"
@@ -37,9 +42,11 @@ LEGACY_TICK_AGENT="$LAUNCH_AGENT_DIR/com.notchy.usage.plist"
 echo "postinstall: target user=$TARGET_USER home=$TARGET_HOME"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-mkdir -p "$NOTCHY_DIR" "$STATE_DIR" "$LAUNCH_AGENT_DIR" "$CLAUDE_DIR"
+mkdir -p "$NOTCHY_DIR" "$STATE_DIR" "$LAUNCH_AGENT_DIR" "$CLAUDE_DIR" "$CODEX_NOTCHY_DIR"
 cp "$SCRIPT_DIR/play.sh" "$PLAY_SH"
 chmod +x "$PLAY_SH"
+cp "$SCRIPT_DIR/codex-play.sh" "$CODEX_PLAY_SH"
+chmod +x "$CODEX_PLAY_SH"
 
 # Minimal standalone statusline script — used when the user has no
 # existing one. It silently writes live rate-limits and prints nothing.
@@ -188,6 +195,99 @@ with open(path, "w") as f:
     json.dump(data, f, indent=2)
 PYEOF
 
+# --- Merge Codex hooks (status colors) ---
+CODEX_CONFIG_FOR_PY="$CODEX_CONFIG_FILE" \
+CODEX_HOOKS_FOR_PY="$CODEX_HOOKS_FILE" \
+CODEX_PLAY_FOR_PY="$CODEX_PLAY_SH" \
+python3 - <<'PYEOF'
+import json, os, re
+from pathlib import Path
+
+config_path = Path(os.environ["CODEX_CONFIG_FOR_PY"])
+hooks_path = Path(os.environ["CODEX_HOOKS_FOR_PY"])
+play_sh = os.environ["CODEX_PLAY_FOR_PY"]
+
+config_path.parent.mkdir(parents=True, exist_ok=True)
+content = config_path.read_text() if config_path.exists() else ""
+
+lines = content.splitlines()
+features_start = None
+for idx, line in enumerate(lines):
+    if re.match(r"^\s*\[features\]\s*(?:#.*)?$", line):
+        features_start = idx
+        break
+
+if features_start is None:
+    if content.strip():
+        lines.extend(["", "[features]", "codex_hooks = true"])
+    else:
+        lines.extend(["[features]", "codex_hooks = true"])
+else:
+    features_end = len(lines)
+    for idx in range(features_start + 1, len(lines)):
+        if re.match(r"^\s*\[.*\]\s*(?:#.*)?$", lines[idx]):
+            features_end = idx
+            break
+
+    codex_hooks_idx = None
+    for idx in range(features_start + 1, features_end):
+        if re.match(r"^\s*codex_hooks\s*=", lines[idx]):
+            codex_hooks_idx = idx
+            break
+
+    if codex_hooks_idx is None:
+        lines.insert(features_start + 1, "codex_hooks = true")
+    else:
+        lines[codex_hooks_idx] = re.sub(
+            r"^(\s*)codex_hooks\s*=.*$",
+            r"\1codex_hooks = true",
+            lines[codex_hooks_idx],
+        )
+
+content = "\n".join(lines) + "\n"
+
+config_path.write_text(content)
+
+events = {
+    "SessionStart": "start",
+    "UserPromptSubmit": "working",
+    "PreToolUse": "working",
+    "PostToolUse": "working",
+    "PostToolUseFailure": "working",
+    "Stop": "complete",
+    "StopFailure": "complete",
+    "Notification": "input",
+    "PermissionRequest": "input",
+}
+
+try:
+    data = json.loads(hooks_path.read_text()) if hooks_path.exists() else {}
+except json.JSONDecodeError:
+    data = {}
+
+hooks = data.setdefault("hooks", {})
+
+def is_ours(command):
+    return "/.codex/notchy/play.sh" in command
+
+for event, arg in events.items():
+    desired = f"{play_sh} {arg}"
+    filtered = []
+    for group in hooks.get(event, []):
+        kept = [h for h in group.get("hooks", []) if not is_ours(h.get("command", ""))]
+        if kept:
+            new_group = {k: v for k, v in group.items() if k != "hooks"}
+            new_group["hooks"] = kept
+            filtered.append(new_group)
+    entry = {"hooks": [{"type": "command", "command": desired}]}
+    if event in ("PermissionRequest", "PreToolUse", "PostToolUse", "PostToolUseFailure"):
+        entry["matcher"] = "*"
+    filtered.append(entry)
+    hooks[event] = filtered
+
+hooks_path.write_text(json.dumps(data, indent=2) + "\n")
+PYEOF
+
 # --- LaunchAgent for the app ---
 cat > "$APP_LAUNCH_AGENT" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -205,6 +305,10 @@ cat > "$APP_LAUNCH_AGENT" <<EOF
 EOF
 
 chown -R "$TARGET_USER" "$CLAUDE_DIR" "$APP_LAUNCH_AGENT"
+[ -d "$CODEX_DIR" ] && chown "$TARGET_USER" "$CODEX_DIR"
+[ -f "$CODEX_CONFIG_FILE" ] && chown "$TARGET_USER" "$CODEX_CONFIG_FILE"
+[ -f "$CODEX_HOOKS_FILE" ] && chown "$TARGET_USER" "$CODEX_HOOKS_FILE"
+[ -d "$CODEX_NOTCHY_DIR" ] && chown -R "$TARGET_USER" "$CODEX_NOTCHY_DIR"
 
 UID_NUM="$(id -u "$TARGET_USER")"
 
