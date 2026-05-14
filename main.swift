@@ -305,17 +305,55 @@ struct ClaudeCrabIcon: View {
     }
 }
 
+struct CodexMark: View {
+    var body: some View {
+        Text("C")
+            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .foregroundColor(.black)
+            .frame(width: 14, height: 14)
+            .background(Circle().fill(Color.white.opacity(0.9)))
+    }
+}
+
 // MARK: - Notch view (collapsed state, matching Vibe Notch's pre-expansion look)
 
 struct NotchContentView: View {
-    @ObservedObject var model: AgentStatusModel
-    @ObservedObject var usage: AgentUsageModel
+    @ObservedObject var claudeStatus: AgentStatusModel
+    @ObservedObject var claudeUsage: AgentUsageModel
+    @ObservedObject var codexStatus: AgentStatusModel
+    @ObservedObject var codexUsage: AgentUsageModel
     let collapsedSize: CGSize
     let expandedSize: CGSize
 
     @State private var hovering: Bool = false
 
-    var effectiveStatus: String {
+    private var claudeSnapshot: AgentSnapshot {
+        AgentSnapshot(
+            kind: .claude,
+            name: "Claude",
+            status: effectiveStatus(for: claudeStatus),
+            project: claudeStatus.project,
+            lastEventTs: claudeStatus.lastEventTs,
+            usage: claudeUsage
+        )
+    }
+
+    private var codexSnapshot: AgentSnapshot {
+        AgentSnapshot(
+            kind: .codex,
+            name: "Codex",
+            status: effectiveStatus(for: codexStatus),
+            project: codexStatus.project,
+            lastEventTs: codexStatus.lastEventTs,
+            usage: codexUsage
+        )
+    }
+
+    private var activeSnapshot: AgentSnapshot {
+        codexSnapshot.lastEventTs > claudeSnapshot.lastEventTs ? codexSnapshot : claudeSnapshot
+    }
+
+    private func effectiveStatus(for model: AgentStatusModel) -> String {
         if model.status == "waiting" {
             let age = Int(Date().timeIntervalSince1970) - model.lastEventTs
             if age > 3 { return "idle" }
@@ -324,7 +362,7 @@ struct NotchContentView: View {
     }
 
     var dotColor: Color {
-        switch effectiveStatus {
+        switch activeSnapshot.status {
         case "working": return Color(red: 0.30, green: 0.85, blue: 0.45)
         case "waiting": return Color(red: 0.98, green: 0.78, blue: 0.20)
         case "error":   return Color(red: 0.95, green: 0.35, blue: 0.30)
@@ -385,7 +423,11 @@ struct NotchContentView: View {
                 // expanded uses 22pt to line up with the detail rows below.
                 HStack(spacing: 0) {
                     Spacer().frame(width: hovering ? 22 : 14)
-                    ClaudeCrabIcon(size: 14)
+                    if activeSnapshot.kind == .claude {
+                        ClaudeCrabIcon(size: 14)
+                    } else {
+                        CodexMark()
+                    }
                     Spacer(minLength: 0)
                     Circle()
                         .fill(dotColor)
@@ -409,22 +451,11 @@ struct NotchContentView: View {
 
     private var expandedDetail: some View {
         VStack(alignment: .leading, spacing: 10) {
-            usageRow(label: "5h block",
-                     pct: usage.blockPct,
-                     reset: usage.blockResetUnix)
-            usageRow(label: "This week",
-                     pct: usage.weeklyPct,
-                     reset: usage.weeklyResetUnix)
+            agentRow(claudeSnapshot, showUsage: true)
+            Divider().background(Color.white.opacity(0.12))
+            agentRow(codexSnapshot, showUsage: false)
             HStack {
-                if !model.project.isEmpty {
-                    Text(model.project)
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.55))
-                }
                 Spacer()
-                Text(effectiveStatus)
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.55))
                 Button(action: { NSApp.terminate(nil) }) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 12, weight: .medium))
@@ -434,6 +465,37 @@ struct NotchContentView: View {
                 .help("Quit")
             }
             .padding(.top, 2)
+        }
+    }
+
+    private func agentRow(_ snapshot: AgentSnapshot, showUsage: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                if snapshot.kind == .claude {
+                    ClaudeCrabIcon(size: 12)
+                } else {
+                    CodexMark()
+                        .scaleEffect(0.86)
+                }
+                Text(snapshot.name)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.82))
+                if !snapshot.project.isEmpty {
+                    Text(snapshot.project)
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.5))
+                        .lineLimit(1)
+                }
+                Spacer()
+                Text(snapshot.status)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+            }
+
+            if showUsage, let usage = snapshot.usage {
+                usageRow(label: "5h block", pct: usage.blockPct, reset: usage.blockResetUnix)
+                usageRow(label: "This week", pct: usage.weeklyPct, reset: usage.weeklyResetUnix)
+            }
         }
     }
 
@@ -551,7 +613,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Expanded pill: wider for the weekly bar + labels, taller for the detail block.
         let expandedSize = CGSize(
             width:  max(360, collapsedSize.width + 60),
-            height: collapsedSize.height + 120
+            height: collapsedSize.height + 180
         )
 
         let frame = NSRect(
@@ -563,8 +625,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let p = NotchPanel(contentRect: frame, styleMask: [], backing: .buffered, defer: false)
         let host = NSHostingView(rootView: NotchContentView(
-            model: claudeStatus,
-            usage: claudeUsage,
+            claudeStatus: claudeStatus,
+            claudeUsage: claudeUsage,
+            codexStatus: codexStatus,
+            codexUsage: codexUsage,
             collapsedSize: collapsedSize,
             expandedSize: expandedSize
         ))
