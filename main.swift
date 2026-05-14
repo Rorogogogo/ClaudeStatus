@@ -317,6 +317,14 @@ struct CodexMark: View {
 
 // MARK: - Notch view (collapsed state, matching Vibe Notch's pre-expansion look)
 
+// Hover state driven externally (by a global mouse-location poll in
+// AppDelegate) so the panel can be fully click-through while still expanding
+// on hover.
+@MainActor
+final class PillHoverState: ObservableObject {
+    @Published var hovering: Bool = false
+}
+
 struct NotchContentView: View {
     @ObservedObject var claudeStatus: AgentStatusModel
     @ObservedObject var claudeUsage: AgentUsageModel
@@ -324,8 +332,9 @@ struct NotchContentView: View {
     @ObservedObject var codexUsage: AgentUsageModel
     let collapsedSize: CGSize
     let expandedSize: CGSize
+    @ObservedObject var hoverState: PillHoverState
 
-    @State private var hovering: Bool = false
+    private var hovering: Bool { hoverState.hovering }
 
     private var claudeSnapshot: AgentSnapshot {
         AgentSnapshot(
@@ -396,17 +405,10 @@ struct NotchContentView: View {
 
             pillView
                 .frame(width: currentSize.width, height: currentSize.height)
-                .contentShape(NotchShape(
-                    topCornerRadius: 6,
-                    bottomCornerRadius: hovering ? 22 : 14
-                ).path(in: CGRect(origin: .zero, size: currentSize)))
-                .onHover { isHovering in
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
-                        hovering = isHovering
-                    }
-                }
+                .allowsHitTesting(false)
         }
         .frame(width: expandedSize.width, height: expandedSize.height, alignment: .top)
+        .animation(.spring(response: 0.32, dampingFraction: 0.78), value: hovering)
     }
 
     private var pillView: some View {
@@ -526,7 +528,9 @@ final class NotchPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = false
         isMovable = false
-        ignoresMouseEvents = false
+        // Fully click-through; hover is detected via a global mouse-location
+        // poll in AppDelegate, not via panel-local mouse events.
+        ignoresMouseEvents = true
         level = .init(Int(CGWindowLevelForKey(.mainMenuWindow)) + 3)
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
         titleVisibility = .hidden
@@ -548,6 +552,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var screenObserver: NSObjectProtocol?
     private var visibilityTimer: Timer?
     private var visibilityCancellables = Set<AnyCancellable>()
+
+    // Hover detection (panel is click-through, so we poll the global cursor).
+    private var hoverState = PillHoverState()
+    private var hoverTimer: Timer?
+    private var collapsedScreenRect: CGRect = .zero
+    private var expandedScreenRect: CGRect = .zero
 
     private let idleHideAfterSeconds: TimeInterval = 10 * 60
 
@@ -580,6 +590,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Periodic check to hide after the idle window elapses with no new events
         visibilityTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.applyVisibility() }
+        }
+
+        // Poll the global cursor location to drive hover expansion. Use a
+        // non-scheduled Timer added to .common run-loop mode so it fires
+        // even while AppKit is in event-tracking modes.
+        let t = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateHover() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        hoverTimer = t
+    }
+
+    private func updateHover() {
+        guard let panel, panel.isVisible else {
+            if hoverState.hovering { hoverState.hovering = false }
+            return
+        }
+        let p = NSEvent.mouseLocation  // screen coords, bottom-left origin
+        if hoverState.hovering {
+            // Stay expanded as long as cursor is inside the expanded rect.
+            if !expandedScreenRect.contains(p) { hoverState.hovering = false }
+        } else {
+            // Trigger expansion only when cursor enters the small collapsed pill.
+            if collapsedScreenRect.contains(p) { hoverState.hovering = true }
         }
     }
 
@@ -624,19 +658,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         let p = NotchPanel(contentRect: frame, styleMask: [], backing: .buffered, defer: false)
+        hoverState.hovering = false
         let host = NSHostingView(rootView: NotchContentView(
             claudeStatus: claudeStatus,
             claudeUsage: claudeUsage,
             codexStatus: codexStatus,
             codexUsage: codexUsage,
             collapsedSize: collapsedSize,
-            expandedSize: expandedSize
+            expandedSize: expandedSize,
+            hoverState: hoverState
         ))
         host.frame = NSRect(origin: .zero, size: expandedSize)
         p.contentView = host
         p.setFrame(frame, display: true)
         p.orderFrontRegardless()
         panel = p
+
+        // Pill rects in screen coords (bottom-left origin) for hover hit-testing.
+        collapsedScreenRect = CGRect(
+            x: screenFrame.midX - collapsedSize.width / 2,
+            y: screenFrame.maxY - collapsedSize.height,
+            width: collapsedSize.width,
+            height: collapsedSize.height
+        )
+        expandedScreenRect = CGRect(
+            x: screenFrame.midX - expandedSize.width / 2,
+            y: screenFrame.maxY - expandedSize.height,
+            width: expandedSize.width,
+            height: expandedSize.height
+        )
     }
 }
 
