@@ -1,19 +1,18 @@
 #!/bin/bash
-# ClaudeStatus postinstall.
+# Notchy postinstall.
 #
-# macOS Installer runs this as root after copying /Applications/ClaudeStatus.app.
+# macOS Installer runs this as root after copying /Applications/Notchy.app.
 # Responsibilities:
-#   1. Install play.sh into the installing user's ~/.claude/sounds/peon-ping/
-#   2. Merge hook entries into ~/.claude/settings.json (idempotent)
-#   3. Write a LaunchAgent plist pointed at the user's binary path
-#   4. Load the LaunchAgent so the app starts now and on every login
+#   1. Install statusline writer + hook script under ~/.claude/notchy/
+#   2. Merge Claude Code hook entries into ~/.claude/settings.json (idempotent)
+#   3. Integrate live-usage writer into the user's statusline-command.sh
+#      (or create a minimal one + register it in settings.json if none exists)
+#   4. Write/load LaunchAgent so the app starts now and on every login
 #
-# Re-running the installer is safe: hooks are merged (not duplicated) and
-# the LaunchAgent is reloaded.
+# Re-running the installer is safe.
 
 set -eu
 
-# Discover the user actually doing the install (not root)
 TARGET_USER="$(stat -f %Su /dev/console)"
 if [ -z "$TARGET_USER" ] || [ "$TARGET_USER" = "root" ]; then
   echo "postinstall: could not resolve target user (got '$TARGET_USER')" >&2
@@ -23,89 +22,181 @@ TARGET_HOME="$(dscl . -read /Users/"$TARGET_USER" NFSHomeDirectory 2>/dev/null |
 [ -z "$TARGET_HOME" ] && TARGET_HOME="/Users/$TARGET_USER"
 
 CLAUDE_DIR="$TARGET_HOME/.claude"
-HOOK_DIR="$CLAUDE_DIR/sounds/peon-ping"
+NOTCHY_DIR="$CLAUDE_DIR/notchy"
 STATE_DIR="$CLAUDE_DIR/state"
 SETTINGS_FILE="$CLAUDE_DIR/settings.json"
-PLAY_SH="$HOOK_DIR/play.sh"
+PLAY_SH="$NOTCHY_DIR/play.sh"
+NOTCHY_STATUSLINE="$NOTCHY_DIR/statusline.sh"
 LAUNCH_AGENT_DIR="$TARGET_HOME/Library/LaunchAgents"
-LAUNCH_AGENT_PLIST="$LAUNCH_AGENT_DIR/com.claudestatus.app.plist"
-APP_BIN="/Applications/ClaudeStatus.app/Contents/MacOS/ClaudeStatus"
+APP_LAUNCH_AGENT="$LAUNCH_AGENT_DIR/com.notchy.app.plist"
+APP_BIN="/Applications/Notchy.app/Contents/MacOS/Notchy"
+
+LEGACY_AGENT_APP="$LAUNCH_AGENT_DIR/com.claudestatus.app.plist"
+LEGACY_TICK_AGENT="$LAUNCH_AGENT_DIR/com.notchy.usage.plist"
 
 echo "postinstall: target user=$TARGET_USER home=$TARGET_HOME"
 
-# 1. Install play.sh — copy from the script bundle's own directory,
-#    which is the working dir for pkg postinstall scripts.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-mkdir -p "$HOOK_DIR" "$STATE_DIR"
+mkdir -p "$NOTCHY_DIR" "$STATE_DIR" "$LAUNCH_AGENT_DIR" "$CLAUDE_DIR"
 cp "$SCRIPT_DIR/play.sh" "$PLAY_SH"
 chmod +x "$PLAY_SH"
 
-# 2. Merge hook entries into settings.json (idempotent — replaces any existing
-#    ClaudeStatus entries, preserves everything else).
-mkdir -p "$CLAUDE_DIR"
+# Minimal standalone statusline script — used when the user has no
+# existing one. It silently writes live rate-limits and prints nothing.
+cat > "$NOTCHY_STATUSLINE" <<'NSEOF'
+#!/usr/bin/env bash
+# Notchy minimal statusline. Reads the JSON Claude Code pipes to statusline
+# commands, extracts rate_limits, and writes them to ~/.claude/state/usage.
+# Prints an empty line so Claude Code is happy.
+input=$(cat)
+{
+  mkdir -p "$HOME/.claude/state" 2>/dev/null
+  line=$(echo "$input" | jq -r '
+    if .rate_limits then
+      [(.rate_limits.five_hour.used_percentage  // 0),
+       (.rate_limits.five_hour.resets_at        // 0),
+       (.rate_limits.seven_day.used_percentage  // 0),
+       (.rate_limits.seven_day.resets_at        // 0)] | @tsv
+    else empty end
+  ' 2>/dev/null)
+  [ -n "$line" ] && echo "$line" > "$HOME/.claude/state/usage"
+} &
+echo ""
+NSEOF
+chmod +x "$NOTCHY_STATUSLINE"
+
 [ ! -f "$SETTINGS_FILE" ] && echo '{}' > "$SETTINGS_FILE"
 
-PLAY_SH_FOR_PY="$PLAY_SH" python3 - "$SETTINGS_FILE" <<'PYEOF'
-import json, os, sys
+# --- Merge Claude Code hooks (status colors) + integrate statusline writer ---
+PLAY_SH_FOR_PY="$PLAY_SH" \
+NOTCHY_STATUSLINE_FOR_PY="$NOTCHY_STATUSLINE" \
+HOME_FOR_PY="$TARGET_HOME" \
+python3 - "$SETTINGS_FILE" <<'PYEOF'
+import json, os, re, sys
 
-path = sys.argv[1]
-play_sh = os.environ["PLAY_SH_FOR_PY"]
+path             = sys.argv[1]
+play_sh          = os.environ["PLAY_SH_FOR_PY"]
+notchy_statline  = os.environ["NOTCHY_STATUSLINE_FOR_PY"]
+home             = os.environ["HOME_FOR_PY"]
 
-with open(path) as f:
-    try:
+# --- Load settings.json (preserving everything else) ---
+try:
+    with open(path) as f:
         data = json.load(f)
-    except json.JSONDecodeError:
-        data = {}
+except (FileNotFoundError, json.JSONDecodeError):
+    data = {}
 
+# --- 1. Merge hook entries (status dot colors) ---
 hooks = data.setdefault("hooks", {})
-
-# Hook events ClaudeStatus uses, mapped to the play.sh arg they pass.
 events = {
-    "SessionStart":      "start",
-    "UserPromptSubmit":  "working",
-    "PreToolUse":        "working",
-    "PostToolUse":       "working",
-    "PostToolUseFailure":"working",
-    "Stop":              "complete",
-    "StopFailure":       "complete",
-    "Notification":      "input",
-    "PermissionRequest": "input",
+    "SessionStart":       "start",
+    "UserPromptSubmit":   "working",
+    "PreToolUse":         "working",
+    "PostToolUse":        "working",
+    "PostToolUseFailure": "working",
+    "Stop":               "complete",
+    "StopFailure":        "complete",
+    "Notification":       "input",
+    "PermissionRequest":  "input",
 }
-
+def is_ours(cmd):
+    return ("claude/sounds/peon-ping/play.sh" in cmd) or ("claude/notchy/play.sh" in cmd)
 for event, arg in events.items():
-    desired_command = f"{play_sh} {arg}"
-    existing = hooks.get(event, [])
-    # Drop any existing ClaudeStatus entries (anything pointing at play.sh)
+    desired = f"{play_sh} {arg}"
     filtered = []
-    for group in existing:
-        kept_hooks = [h for h in group.get("hooks", []) if "claude/sounds/peon-ping/play.sh" not in h.get("command", "")]
-        if kept_hooks:
-            new_group = {k: v for k, v in group.items() if k != "hooks"}
-            new_group["hooks"] = kept_hooks
-            filtered.append(new_group)
-    # Append our entry
-    entry = {"hooks": [{"type": "command", "command": desired_command}]}
+    for group in hooks.get(event, []):
+        kept = [h for h in group.get("hooks", []) if not is_ours(h.get("command", ""))]
+        if kept:
+            ng = {k: v for k, v in group.items() if k != "hooks"}
+            ng["hooks"] = kept
+            filtered.append(ng)
+    entry = {"hooks": [{"type": "command", "command": desired}]}
     if event in ("PermissionRequest", "PreToolUse", "PostToolUse", "PostToolUseFailure"):
         entry["matcher"] = "*"
     filtered.append(entry)
     hooks[event] = filtered
 
+# --- 2. Integrate statusline writer ---
+MARK_BEGIN = "# notchy-writer-begin"
+MARK_END   = "# notchy-writer-end"
+WRITER_BLOCK = f"""{MARK_BEGIN}
+# Live rate-limits writer for the Notchy status pill. Reads $input
+# (already captured by this script) and writes ~/.claude/state/usage.
+# Safe to remove this block at any time.
+{{
+  mkdir -p "$HOME/.claude/state" 2>/dev/null
+  _notchy_line=$(echo "$input" | jq -r '
+    if .rate_limits then
+      [(.rate_limits.five_hour.used_percentage  // 0),
+       (.rate_limits.five_hour.resets_at        // 0),
+       (.rate_limits.seven_day.used_percentage  // 0),
+       (.rate_limits.seven_day.resets_at        // 0)] | @tsv
+    else empty end
+  ' 2>/dev/null)
+  [ -n "$_notchy_line" ] && echo "$_notchy_line" > "$HOME/.claude/state/usage"
+}} &
+{MARK_END}
+"""
+
+def script_path_from_cmd(cmd):
+    """Find the first existing .sh file referenced in a statusline command."""
+    if not isinstance(cmd, str):
+        return None
+    for tok in re.split(r"\s+", cmd.strip()):
+        if tok.endswith(".sh") and os.path.exists(tok):
+            return tok
+    return None
+
+def append_block(script_path):
+    """Append our writer block to an existing script, if not already present."""
+    try:
+        with open(script_path, "r") as f:
+            content = f.read()
+    except OSError:
+        return False
+    if MARK_BEGIN in content:
+        return True  # already integrated
+    # Insert after the first occurrence of `input=$(cat)` so $input is defined,
+    # otherwise append to the end.
+    needle = "input=$(cat)"
+    if needle in content:
+        idx = content.index(needle) + len(needle)
+        new = content[:idx] + "\n\n" + WRITER_BLOCK + content[idx:]
+    else:
+        sep = "" if content.endswith("\n") else "\n"
+        new = content + sep + "\n" + WRITER_BLOCK
+    try:
+        with open(script_path, "w") as f:
+            f.write(new)
+        return True
+    except OSError:
+        return False
+
+statusline = data.get("statusLine") or {}
+existing_cmd = statusline.get("command") if isinstance(statusline, dict) else None
+existing_script = script_path_from_cmd(existing_cmd)
+
+if existing_script:
+    # User has a statusline script — append our block (idempotent).
+    append_block(existing_script)
+else:
+    # No usable statusline — point Claude Code at our minimal one.
+    data["statusLine"] = {"type": "command", "command": f"bash {notchy_statline}"}
+
+# --- Save ---
 with open(path, "w") as f:
     json.dump(data, f, indent=2)
 PYEOF
 
-# 3. LaunchAgent plist
-mkdir -p "$LAUNCH_AGENT_DIR"
-cat > "$LAUNCH_AGENT_PLIST" <<EOF
+# --- LaunchAgent for the app ---
+cat > "$APP_LAUNCH_AGENT" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.claudestatus.app</string>
+  <key>Label</key><string>com.notchy.app</string>
   <key>ProgramArguments</key>
-  <array>
-    <string>$APP_BIN</string>
-  </array>
+  <array><string>$APP_BIN</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ProcessType</key><string>Background</string>
@@ -113,14 +204,20 @@ cat > "$LAUNCH_AGENT_PLIST" <<EOF
 </plist>
 EOF
 
-# 4. Fix ownership of everything we wrote to the user's home
-chown -R "$TARGET_USER" "$CLAUDE_DIR" "$LAUNCH_AGENT_PLIST"
+chown -R "$TARGET_USER" "$CLAUDE_DIR" "$APP_LAUNCH_AGENT"
 
-# 5. Load (or reload) the LaunchAgent as the target user
 UID_NUM="$(id -u "$TARGET_USER")"
-sudo -u "$TARGET_USER" launchctl bootout "gui/$UID_NUM/com.claudestatus.app" 2>/dev/null || true
-sudo -u "$TARGET_USER" launchctl bootstrap "gui/$UID_NUM" "$LAUNCH_AGENT_PLIST" || \
-  sudo -u "$TARGET_USER" launchctl load "$LAUNCH_AGENT_PLIST" || true
 
-echo "postinstall: done. Restart any running Claude Code session for hooks to take effect."
+# Bootout legacy agents from prior versions
+for legacy_label in com.claudestatus.app com.notchy.usage; do
+  sudo -u "$TARGET_USER" launchctl bootout "gui/$UID_NUM/$legacy_label" 2>/dev/null || true
+done
+rm -f "$LEGACY_AGENT_APP" "$LEGACY_TICK_AGENT"
+pkill -x ClaudeStatus 2>/dev/null || true
+
+# (Re)load our agent
+sudo -u "$TARGET_USER" launchctl bootout    "gui/$UID_NUM/com.notchy.app" 2>/dev/null || true
+sudo -u "$TARGET_USER" launchctl bootstrap  "gui/$UID_NUM" "$APP_LAUNCH_AGENT" || true
+
+echo "postinstall: done."
 exit 0

@@ -1,19 +1,19 @@
 #!/bin/bash
-# Build ClaudeStatus.app and ClaudeStatus.pkg.
+# Build Notchy.app and Notchy.pkg.
 #
 # Requirements:
 #   - Xcode Command Line Tools (`xcode-select --install`)
 #   - macOS 14+ (Sonoma) — needed for safeAreaInsets / auxiliaryTopRightArea APIs
 #
 # Outputs:
-#   build/ClaudeStatus.app  — the standalone app bundle
-#   build/ClaudeStatus.pkg  — the macOS installer
+#   build/Notchy.app  — the standalone app bundle
+#   build/Notchy.pkg  — the macOS installer
 
 set -euo pipefail
 
-VERSION="1.0.0"
-IDENTIFIER="com.claudestatus.app"
-APP_NAME="ClaudeStatus"
+VERSION="1.1.0"
+IDENTIFIER="com.notchy.app"
+APP_NAME="Notchy"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD="$ROOT/build"
 PKG_ROOT="$BUILD/pkg-root"
@@ -63,7 +63,7 @@ xattr -cr "$APP_PATH" 2>/dev/null || true
 # so anything we drop here is reachable via $PWD/<name> from postinstall.
 mkdir -p "$BUILD/scripts"
 cp "$ROOT/scripts/postinstall" "$BUILD/scripts/postinstall"
-cp "$ROOT/play.sh" "$BUILD/scripts/play.sh"
+cp "$ROOT/play.sh"             "$BUILD/scripts/play.sh"
 chmod +x "$BUILD/scripts/postinstall" "$BUILD/scripts/play.sh"
 
 echo "[5/5] Building .pkg..."

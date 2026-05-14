@@ -1,88 +1,116 @@
 <p align="center">
-  <img src="assets/logo.png" width="128" height="128" alt="ClaudeStatus logo" />
+  <img src="assets/logo.png" width="128" height="128" alt="Notchy logo" />
 </p>
 
-# ClaudeStatus
+# Notchy
 
-A tiny, native macOS status indicator for [Claude Code](https://docs.claude.com/en/docs/claude-code) — sits next to your camera in the notch and turns 🟢 / 🟡 / ⚪ as the agent works / waits for you / goes idle.
+A tiny, native macOS status indicator for [Claude Code](https://docs.claude.com/en/docs/claude-code) — sits next to your camera in the notch, turns 🟢 / 🟡 / ⚪ as the agent works / waits / idles, and unfolds on hover to show live 5h and weekly usage straight from `/usage`.
 
-Built as a lightweight alternative to heavier "dynamic island for Claude" tools. Single Swift binary, no Electron, no Python, no background watchers spinning at 60Hz.
+Built as a lightweight alternative to heavier "Dynamic Island for Claude" tools. Single Swift binary, no Electron, no Python, no background watchers spinning at 60 Hz.
 
-### [⬇️ Download ClaudeStatus.pkg (v1.0.0)](https://github.com/Rorogogogo/ClaudeStatus/releases/latest/download/ClaudeStatus.pkg)
+### [⬇️ Download Notchy.pkg (v1.1.0)](https://github.com/Rorogogogo/Notchy/releases/latest/download/Notchy.pkg)
 
 ## Why this exists
 
-A passive, glance-and-go indicator. No clickable UI, no chat history, no background animations spinning at 60 Hz — just a tiny dot that tells you whether the agent is working, waiting on you, or idle.
+A passive, glance-and-go indicator. No clickable widgets, no chat history, no background animations spinning at 60 Hz — just a tiny pill that tells you whether the agent is working, waiting on you, or idle, plus a hover-expansion with the actual quota numbers `/usage` would show.
 
 Measured on an M-series MacBook Pro:
 
-- **0.1 % idle CPU** — the only thing running between events is a 250 ms `stat()` poll
-- **~29 MB RSS** — single native binary, no framework runtime overhead
-- **~180 KB binary** — ~200 lines of Swift, links against the system AppKit / SwiftUI
+- **~0.1 % idle CPU** — between events, only a 250 ms `stat()` poll and a 1 s tick timer
+- **~32 MB RSS** — single native binary, no framework runtime overhead
+- **~220 KB binary** — compact Swift, links against the system AppKit / SwiftUI
 - **Event-driven** via `kqueue` (`DispatchSource.makeFileSystemObjectSource`), not per-frame redraws
 
 ## What it shows
 
 - A small black notch-shaped pill, slightly wider than the physical notch
-- 🦀 Coral Claude-style crab icon on the left of the camera
-- A colored status dot on the right of the camera:
+- 🦀 Coral Claude-style crab on the left
+- A colored status dot on the right:
   - 🟢 **green** — working (you sent a prompt, agent is generating or running a tool)
-  - 🟡 **yellow** — waiting on you (permission prompt or other input needed)
+  - 🟡 **yellow** — waiting on you (permission prompt or other input)
   - ⚪ **gray** — idle (last turn finished cleanly)
+- Hover the pill to expand Dynamic-Island-style and reveal:
+  - **5h block** usage with a 16-segment bar and reset countdown
+  - **This week** usage with a 16-segment bar and reset countdown
+  - Current project + status, with a one-click quit button
 - Hides itself completely after 10 minutes of no activity, reappears the instant any Claude Code hook fires.
+
+## Live usage data, exactly matching `/usage`
+
+The 5h-block and weekly percentages are **the same numbers** Claude Code's built-in `/usage` shows — including the precise reset times. Notchy doesn't estimate, it doesn't poll Anthropic, it doesn't need an admin API key.
+
+It works by tapping the JSON Claude Code already pipes to your **statusline command** on every TUI render. That JSON contains:
+
+```json
+"rate_limits": {
+  "five_hour":  { "used_percentage": 52, "resets_at": 1778767200 },
+  "seven_day":  { "used_percentage": 33, "resets_at": 1779087600 }
+}
+```
+
+Notchy's installer adds a 10-line writer block to your `~/.claude/statusline-command.sh` (or creates a minimal one if you have none) that extracts those fields into `~/.claude/state/usage`. The app file-watches that path with `kqueue` and re-renders the bars when it changes. Zero polling, zero network calls.
+
+Numbers refresh on every statusline render (i.e. while a TUI is active). When no TUI is open, the last known numbers stay on screen until the next render.
 
 ## Requirements
 
 - macOS 14 (Sonoma) or later
 - A MacBook with a notch (M-series 14"/16" Pro, M3 Air, etc.)
 - Claude Code installed
+- `jq` on `PATH` (preinstalled on most dev machines; `brew install jq` if missing)
 - For building from source: Xcode Command Line Tools (`xcode-select --install`)
 
 ## Install (from the .pkg)
 
-1. Download `ClaudeStatus.pkg` from the [Releases](https://github.com/Rorogogogo/ClaudeStatus/releases) page.
-2. Double-click. macOS will show "ClaudeStatus.pkg cannot be opened because it is from an unidentified developer."
-3. Open **System Settings → Privacy & Security**, scroll to the message about ClaudeStatus, click **Open Anyway**.
+1. Download `Notchy.pkg` from the [Releases](https://github.com/Rorogogogo/Notchy/releases) page.
+2. Double-click. macOS will show "Notchy.pkg cannot be opened because it is from an unidentified developer."
+3. Open **System Settings → Privacy & Security**, scroll to the message about Notchy, click **Open Anyway**.
 4. Walk through the macOS Installer.
-5. **Restart any running Claude Code session.** Hooks only load at session start.
+5. **Restart any running Claude Code session.** Hooks and the statusline command only load at session start.
 
 > The package is ad-hoc signed (free) but not notarized (requires a paid Apple Developer account). That's why you need the one-time "Open Anyway" step.
 
 The installer's postinstall script will:
 
-- Copy the app to `/Applications/ClaudeStatus.app`
-- Install `play.sh` to `~/.claude/sounds/peon-ping/play.sh`
-- Merge hook entries into `~/.claude/settings.json` (existing hooks are preserved)
-- Write a LaunchAgent at `~/Library/LaunchAgents/com.claudestatus.app.plist`
+- Copy the app to `/Applications/Notchy.app`
+- Install scripts to `~/.claude/notchy/` (`play.sh` for status hooks, `statusline.sh` for live usage)
+- Merge Claude Code hook entries into `~/.claude/settings.json` (existing hooks preserved)
+- Append a marked writer block to your existing `~/.claude/statusline-command.sh`, or register a minimal one if you don't have a statusline configured
+- Write a LaunchAgent at `~/Library/LaunchAgents/com.notchy.app.plist`
 - Start the app immediately and on every login
+- Clean up any artifacts from the legacy `ClaudeStatus` build
 
-Re-running the installer is safe — it replaces (doesn't duplicate) the ClaudeStatus hook entries.
+Re-running the installer is safe — hooks and writer blocks are detected by marker comments and replaced, not duplicated.
 
 ## Build from source
 
 ```bash
-git clone https://github.com/Rorogogogo/ClaudeStatus.git
-cd ClaudeStatus
+git clone https://github.com/Rorogogogo/Notchy.git
+cd Notchy
 ./build.sh
 ```
 
 Outputs:
-- `build/ClaudeStatus.app` — the standalone app
-- `build/ClaudeStatus.pkg` — the installer
+- `build/pkg-root/Applications/Notchy.app` — the standalone app
+- `build/Notchy.pkg` — the installer
 
 ## How it works
 
-Three pieces:
+Four pieces:
 
-1. **`play.sh`** — invoked by Claude Code hook events. Reads the hook's JSON payload from stdin, extracts the working directory, writes `<status>\t<unix_ts>\t<project_name>\n` to `~/.claude/state/status`. ~20 ms per invocation.
+1. **`play.sh`** — invoked by Claude Code hook events. Reads the hook payload from stdin, writes `<status>\t<unix_ts>\t<project_name>\n` to `~/.claude/state/status`. ~20 ms per invocation.
 
-2. **`~/.claude/state/status`** — single text file that holds the current state. Updated by `play.sh` on every hook event.
+2. **Statusline writer** — a 10-line block injected into your `~/.claude/statusline-command.sh`. Each statusline render, it pulls `rate_limits` from the JSON Claude Code piped to stdin and writes `<block_pct>\t<block_reset>\t<weekly_pct>\t<weekly_reset>\n` to `~/.claude/state/usage`. Runs in `&` background so your statusline render isn't blocked.
 
-3. **`ClaudeStatus.app`** — a long-running native macOS app:
-   - Floating `NSPanel` over the physical notch, level above the menu bar, ignores mouse events
-   - Notch-shaped pill drawn with a custom `Shape` (top corner radius 6 inward, bottom 14 outward — same curves as the iPhone Dynamic Island)
-   - Watches `~/.claude/state/status` with a `DispatchSource.makeFileSystemObjectSource` (`kqueue` under the hood). Re-reads only when the kernel fires a `VNODE_WRITE`. A 250 ms `stat()` poll is the belt-and-suspenders backup.
-   - Auto-expires `waiting` to `idle` after 3 s, because Claude Code doesn't emit a hook when a user denies a permission prompt (see [Caveats](#caveats)).
+3. **`~/.claude/state/{status,usage}`** — two single-line text files. Authoritative source of truth for the app.
+
+4. **`Notchy.app`** — a long-running native macOS app:
+   - Floating `NSPanel` over the physical notch, level above the menu bar
+   - Notch-shaped pill drawn with a custom `Shape` (top corners 6pt inward, bottom 14pt outward when collapsed, 22pt when expanded — same curves as the iPhone Dynamic Island)
+   - File-watches both state files with `DispatchSource.makeFileSystemObjectSource` (kqueue under the hood). Re-renders only when the kernel fires `VNODE_WRITE`.
+   - Hover detection constrained to the visible pill shape via `.contentShape(NotchShape(...))`, so transparent areas around the pill don't block clicks to apps below.
+   - Spring-animated expansion: ~0.32 s response, 0.78 damping.
+   - Auto-expires `waiting` → `idle` after 3 s (see [Caveats](#caveats)).
 
 ## Hooks installed
 
@@ -100,22 +128,23 @@ Three pieces:
 
 ## Caveats
 
-- **No hook fires when the user denies a permission prompt** ([per the docs](https://docs.claude.com/en/docs/claude-code/hooks)). ClaudeStatus handles this by auto-expiring `waiting` → `idle` after 3 seconds with no further events.
+- **No hook fires when the user denies a permission prompt** ([per the docs](https://docs.claude.com/en/docs/claude-code/hooks)). Notchy handles this by auto-expiring `waiting` → `idle` after 3 seconds with no further events.
+- **Live usage only refreshes while a TUI is active.** Anthropic only sends `rate_limits` in the statusline JSON during an interactive session. When no `claude` TUI is open, the bars freeze at the last known values until the next render.
+- **`rate_limits` only appears after the first API response** in a session. Open a fresh `claude` TUI without sending anything, and the bars stay on whatever the previous render left.
 - **Hooks load at session start.** After installing (or reconfiguring), restart any running Claude Code session.
-- **First-launch Gatekeeper warning.** The `.pkg` isn't notarized — right-click → Open the first time, or notarize it yourself if distributing widely.
+- **First-launch Gatekeeper warning.** The `.pkg` isn't notarized — Privacy & Security → "Open Anyway" the first time.
 - **Notch-only.** Older / non-notch displays still get a pill at the top center, but it looks less like a natural notch extension.
 
 ## Uninstall
 
 ```bash
-launchctl bootout "gui/$(id -u)/com.claudestatus.app" 2>/dev/null || \
-  launchctl unload ~/Library/LaunchAgents/com.claudestatus.app.plist
-rm -rf /Applications/ClaudeStatus.app
-rm -f ~/Library/LaunchAgents/com.claudestatus.app.plist
-rm -rf ~/.claude/sounds/peon-ping
+launchctl bootout "gui/$(id -u)/com.notchy.app" 2>/dev/null
+rm -rf /Applications/Notchy.app
+rm -f ~/Library/LaunchAgents/com.notchy.app.plist
+rm -rf ~/.claude/notchy
 ```
 
-Then remove ClaudeStatus's hook entries from `~/.claude/settings.json` — they all reference `~/.claude/sounds/peon-ping/play.sh`.
+Then strip the writer block from `~/.claude/statusline-command.sh` (look for the `# notchy-writer-begin` … `# notchy-writer-end` markers) and remove the Notchy hook entries from `~/.claude/settings.json` (they all reference `~/.claude/notchy/play.sh`).
 
 ## License
 
