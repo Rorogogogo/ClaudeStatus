@@ -5,7 +5,7 @@ import SwiftUI
 // MARK: - Model
 
 @MainActor
-final class StatusModel: ObservableObject {
+final class AgentStatusModel: ObservableObject {
     @Published var status: String = "idle"
     @Published var project: String = ""
     @Published var lastEventTs: Int = 0
@@ -16,9 +16,8 @@ final class StatusModel: ObservableObject {
     private var lastMtime: Date?
     private let statePath: String
 
-    init() {
-        let home = NSHomeDirectory()
-        statePath = "\(home)/.claude/state/status"
+    init(path: String) {
+        statePath = path
         ensureFileExists()
         reload()
         watchFile()
@@ -88,7 +87,7 @@ final class StatusModel: ObservableObject {
 // MARK: - Usage model (5h block + weekly token quota, written by usage-tick.sh)
 
 @MainActor
-final class UsageModel: ObservableObject {
+final class AgentUsageModel: ObservableObject {
     @Published var blockPct: Double = 0
     @Published var weeklyPct: Double = 0
     @Published var blockResetUnix: Int = 0
@@ -99,9 +98,9 @@ final class UsageModel: ObservableObject {
     private var lastMtime: Date?
     private let path: String
 
-    init() {
-        path = "\(NSHomeDirectory())/.claude/state/usage"
-        ensureFileExists()
+    init(path: String, createIfMissing: Bool = true) {
+        self.path = path
+        if createIfMissing { ensureFileExists() }
         reload()
         watchFile()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -161,6 +160,20 @@ final class UsageModel: ObservableObject {
         src.resume()
         fileSource = src
     }
+}
+
+enum AgentKind {
+    case claude
+    case codex
+}
+
+struct AgentSnapshot {
+    let kind: AgentKind
+    let name: String
+    let status: String
+    let project: String
+    let lastEventTs: Int
+    let usage: AgentUsageModel?
 }
 
 // MARK: - Usage bar (5 segments + percent text)
@@ -292,17 +305,64 @@ struct ClaudeCrabIcon: View {
     }
 }
 
+struct CodexMark: View {
+    var body: some View {
+        Text("C")
+            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .foregroundColor(.black)
+            .frame(width: 14, height: 14)
+            .background(Circle().fill(Color.white.opacity(0.9)))
+    }
+}
+
 // MARK: - Notch view (collapsed state, matching Vibe Notch's pre-expansion look)
 
+// Hover state driven externally (by a global mouse-location poll in
+// AppDelegate) so the panel can be fully click-through while still expanding
+// on hover.
+@MainActor
+final class PillHoverState: ObservableObject {
+    @Published var hovering: Bool = false
+}
+
 struct NotchContentView: View {
-    @ObservedObject var model: StatusModel
-    @ObservedObject var usage: UsageModel
+    @ObservedObject var claudeStatus: AgentStatusModel
+    @ObservedObject var claudeUsage: AgentUsageModel
+    @ObservedObject var codexStatus: AgentStatusModel
+    @ObservedObject var codexUsage: AgentUsageModel
     let collapsedSize: CGSize
     let expandedSize: CGSize
+    @ObservedObject var hoverState: PillHoverState
 
-    @State private var hovering: Bool = false
+    private var hovering: Bool { hoverState.hovering }
 
-    var effectiveStatus: String {
+    private var claudeSnapshot: AgentSnapshot {
+        AgentSnapshot(
+            kind: .claude,
+            name: "Claude",
+            status: effectiveStatus(for: claudeStatus),
+            project: claudeStatus.project,
+            lastEventTs: claudeStatus.lastEventTs,
+            usage: claudeUsage
+        )
+    }
+
+    private var codexSnapshot: AgentSnapshot {
+        AgentSnapshot(
+            kind: .codex,
+            name: "Codex",
+            status: effectiveStatus(for: codexStatus),
+            project: codexStatus.project,
+            lastEventTs: codexStatus.lastEventTs,
+            usage: codexUsage
+        )
+    }
+
+    private var activeSnapshot: AgentSnapshot {
+        codexSnapshot.lastEventTs > claudeSnapshot.lastEventTs ? codexSnapshot : claudeSnapshot
+    }
+
+    private func effectiveStatus(for model: AgentStatusModel) -> String {
         if model.status == "waiting" {
             let age = Int(Date().timeIntervalSince1970) - model.lastEventTs
             if age > 3 { return "idle" }
@@ -311,7 +371,7 @@ struct NotchContentView: View {
     }
 
     var dotColor: Color {
-        switch effectiveStatus {
+        switch activeSnapshot.status {
         case "working": return Color(red: 0.30, green: 0.85, blue: 0.45)
         case "waiting": return Color(red: 0.98, green: 0.78, blue: 0.20)
         case "error":   return Color(red: 0.95, green: 0.35, blue: 0.30)
@@ -345,17 +405,10 @@ struct NotchContentView: View {
 
             pillView
                 .frame(width: currentSize.width, height: currentSize.height)
-                .contentShape(NotchShape(
-                    topCornerRadius: 6,
-                    bottomCornerRadius: hovering ? 22 : 14
-                ).path(in: CGRect(origin: .zero, size: currentSize)))
-                .onHover { isHovering in
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
-                        hovering = isHovering
-                    }
-                }
+                .allowsHitTesting(false)
         }
         .frame(width: expandedSize.width, height: expandedSize.height, alignment: .top)
+        .animation(.spring(response: 0.32, dampingFraction: 0.78), value: hovering)
     }
 
     private var pillView: some View {
@@ -372,7 +425,11 @@ struct NotchContentView: View {
                 // expanded uses 22pt to line up with the detail rows below.
                 HStack(spacing: 0) {
                     Spacer().frame(width: hovering ? 22 : 14)
-                    ClaudeCrabIcon(size: 14)
+                    if activeSnapshot.kind == .claude {
+                        ClaudeCrabIcon(size: 14)
+                    } else {
+                        CodexMark()
+                    }
                     Spacer(minLength: 0)
                     Circle()
                         .fill(dotColor)
@@ -396,22 +453,11 @@ struct NotchContentView: View {
 
     private var expandedDetail: some View {
         VStack(alignment: .leading, spacing: 10) {
-            usageRow(label: "5h block",
-                     pct: usage.blockPct,
-                     reset: usage.blockResetUnix)
-            usageRow(label: "This week",
-                     pct: usage.weeklyPct,
-                     reset: usage.weeklyResetUnix)
+            agentRow(claudeSnapshot, showUsage: true)
+            Divider().background(Color.white.opacity(0.12))
+            agentRow(codexSnapshot, showUsage: false)
             HStack {
-                if !model.project.isEmpty {
-                    Text(model.project)
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.55))
-                }
                 Spacer()
-                Text(effectiveStatus)
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.55))
                 Button(action: { NSApp.terminate(nil) }) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 12, weight: .medium))
@@ -421,6 +467,37 @@ struct NotchContentView: View {
                 .help("Quit")
             }
             .padding(.top, 2)
+        }
+    }
+
+    private func agentRow(_ snapshot: AgentSnapshot, showUsage: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                if snapshot.kind == .claude {
+                    ClaudeCrabIcon(size: 12)
+                } else {
+                    CodexMark()
+                        .scaleEffect(0.86)
+                }
+                Text(snapshot.name)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.82))
+                if !snapshot.project.isEmpty {
+                    Text(snapshot.project)
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.5))
+                        .lineLimit(1)
+                }
+                Spacer()
+                Text(snapshot.status)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+            }
+
+            if showUsage, let usage = snapshot.usage {
+                usageRow(label: "5h block", pct: usage.blockPct, reset: usage.blockResetUnix)
+                usageRow(label: "This week", pct: usage.weeklyPct, reset: usage.weeklyResetUnix)
+            }
         }
     }
 
@@ -451,7 +528,9 @@ final class NotchPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = false
         isMovable = false
-        ignoresMouseEvents = false
+        // Fully click-through; hover is detected via a global mouse-location
+        // poll in AppDelegate, not via panel-local mouse events.
+        ignoresMouseEvents = true
         level = .init(Int(CGWindowLevelForKey(.mainMenuWindow)) + 3)
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
         titleVisibility = .hidden
@@ -466,11 +545,19 @@ final class NotchPanel: NSPanel {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var panel: NotchPanel?
-    let model = StatusModel()
-    let usage = UsageModel()
+    let claudeStatus = AgentStatusModel(path: "\(NSHomeDirectory())/.claude/state/status")
+    let claudeUsage = AgentUsageModel(path: "\(NSHomeDirectory())/.claude/state/usage")
+    let codexStatus = AgentStatusModel(path: "\(NSHomeDirectory())/.codex/notchy/status")
+    let codexUsage = AgentUsageModel(path: "\(NSHomeDirectory())/.codex/notchy/usage")
     private var screenObserver: NSObjectProtocol?
     private var visibilityTimer: Timer?
-    private var modelCancellable: AnyCancellable?
+    private var visibilityCancellables = Set<AnyCancellable>()
+
+    // Hover detection (panel is click-through, so we poll the global cursor).
+    private var hoverState = PillHoverState()
+    private var hoverTimer: Timer?
+    private var collapsedScreenRect: CGRect = .zero
+    private var expandedScreenRect: CGRect = .zero
 
     private let idleHideAfterSeconds: TimeInterval = 10 * 60
 
@@ -489,22 +576,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // React the instant the status file changes
-        modelCancellable = model.objectWillChange.sink { [weak self] _ in
+        // React the instant either status file changes.
+        claudeStatus.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.applyVisibility() }
         }
+        .store(in: &visibilityCancellables)
+
+        codexStatus.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async { self?.applyVisibility() }
+        }
+        .store(in: &visibilityCancellables)
 
         // Periodic check to hide after the idle window elapses with no new events
         visibilityTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.applyVisibility() }
+        }
+
+        // Poll the global cursor location to drive hover expansion. Use a
+        // non-scheduled Timer added to .common run-loop mode so it fires
+        // even while AppKit is in event-tracking modes.
+        let t = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateHover() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        hoverTimer = t
+    }
+
+    private func updateHover() {
+        guard let panel, panel.isVisible else {
+            if hoverState.hovering { hoverState.hovering = false }
+            return
+        }
+        let p = NSEvent.mouseLocation  // screen coords, bottom-left origin
+        if hoverState.hovering {
+            // Stay expanded as long as cursor is inside the expanded rect.
+            if !expandedScreenRect.contains(p) { hoverState.hovering = false }
+        } else {
+            // Trigger expansion only when cursor enters the small collapsed pill.
+            if collapsedScreenRect.contains(p) { hoverState.hovering = true }
         }
     }
 
     func applyVisibility() {
         guard let panel else { return }
         let now = Int(Date().timeIntervalSince1970)
-        let age = now - model.lastEventTs
-        let shouldShow = model.lastEventTs > 0 && TimeInterval(age) < idleHideAfterSeconds
+        let newestEventTs = max(claudeStatus.lastEventTs, codexStatus.lastEventTs)
+        let age = now - newestEventTs
+        let shouldShow = newestEventTs > 0 && TimeInterval(age) < idleHideAfterSeconds
         if shouldShow {
             if !panel.isVisible { panel.orderFrontRegardless() }
         } else {
@@ -529,7 +647,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Expanded pill: wider for the weekly bar + labels, taller for the detail block.
         let expandedSize = CGSize(
             width:  max(360, collapsedSize.width + 60),
-            height: collapsedSize.height + 120
+            height: collapsedSize.height + 180
         )
 
         let frame = NSRect(
@@ -540,17 +658,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         let p = NotchPanel(contentRect: frame, styleMask: [], backing: .buffered, defer: false)
+        hoverState.hovering = false
         let host = NSHostingView(rootView: NotchContentView(
-            model: model,
-            usage: usage,
+            claudeStatus: claudeStatus,
+            claudeUsage: claudeUsage,
+            codexStatus: codexStatus,
+            codexUsage: codexUsage,
             collapsedSize: collapsedSize,
-            expandedSize: expandedSize
+            expandedSize: expandedSize,
+            hoverState: hoverState
         ))
         host.frame = NSRect(origin: .zero, size: expandedSize)
         p.contentView = host
         p.setFrame(frame, display: true)
         p.orderFrontRegardless()
         panel = p
+
+        // Pill rects in screen coords (bottom-left origin) for hover hit-testing.
+        collapsedScreenRect = CGRect(
+            x: screenFrame.midX - collapsedSize.width / 2,
+            y: screenFrame.maxY - collapsedSize.height,
+            width: collapsedSize.width,
+            height: collapsedSize.height
+        )
+        expandedScreenRect = CGRect(
+            x: screenFrame.midX - expandedSize.width / 2,
+            y: screenFrame.maxY - expandedSize.height,
+            width: expandedSize.width,
+            height: expandedSize.height
+        )
     }
 }
 

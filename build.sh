@@ -51,7 +51,7 @@ cat > "$APP_PATH/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-echo "[4/5] Staging postinstall + play.sh into pkg scripts dir..."
+echo "[4/5] Staging postinstall + play.sh + codex-play.sh into pkg scripts dir..."
 # Keep a copy in the .app Resources/ for users who want to inspect it.
 cp "$ROOT/play.sh" "$APP_PATH/Contents/Resources/play.sh"
 chmod +x "$APP_PATH/Contents/Resources/play.sh"
@@ -64,7 +64,8 @@ xattr -cr "$APP_PATH" 2>/dev/null || true
 mkdir -p "$BUILD/scripts"
 cp "$ROOT/scripts/postinstall" "$BUILD/scripts/postinstall"
 cp "$ROOT/play.sh"             "$BUILD/scripts/play.sh"
-chmod +x "$BUILD/scripts/postinstall" "$BUILD/scripts/play.sh"
+cp "$ROOT/codex-play.sh"       "$BUILD/scripts/codex-play.sh"
+chmod +x "$BUILD/scripts/postinstall" "$BUILD/scripts/play.sh" "$BUILD/scripts/codex-play.sh"
 
 echo "[5/5] Building .pkg..."
 codesign --force --deep --sign - "$APP_PATH"
