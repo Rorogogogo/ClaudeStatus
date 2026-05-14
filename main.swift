@@ -5,7 +5,7 @@ import SwiftUI
 // MARK: - Model
 
 @MainActor
-final class StatusModel: ObservableObject {
+final class AgentStatusModel: ObservableObject {
     @Published var status: String = "idle"
     @Published var project: String = ""
     @Published var lastEventTs: Int = 0
@@ -16,9 +16,8 @@ final class StatusModel: ObservableObject {
     private var lastMtime: Date?
     private let statePath: String
 
-    init() {
-        let home = NSHomeDirectory()
-        statePath = "\(home)/.claude/state/status"
+    init(path: String) {
+        statePath = path
         ensureFileExists()
         reload()
         watchFile()
@@ -88,7 +87,7 @@ final class StatusModel: ObservableObject {
 // MARK: - Usage model (5h block + weekly token quota, written by usage-tick.sh)
 
 @MainActor
-final class UsageModel: ObservableObject {
+final class AgentUsageModel: ObservableObject {
     @Published var blockPct: Double = 0
     @Published var weeklyPct: Double = 0
     @Published var blockResetUnix: Int = 0
@@ -99,9 +98,9 @@ final class UsageModel: ObservableObject {
     private var lastMtime: Date?
     private let path: String
 
-    init() {
-        path = "\(NSHomeDirectory())/.claude/state/usage"
-        ensureFileExists()
+    init(path: String, createIfMissing: Bool = true) {
+        self.path = path
+        if createIfMissing { ensureFileExists() }
         reload()
         watchFile()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -161,6 +160,20 @@ final class UsageModel: ObservableObject {
         src.resume()
         fileSource = src
     }
+}
+
+enum AgentKind {
+    case claude
+    case codex
+}
+
+struct AgentSnapshot {
+    let kind: AgentKind
+    let name: String
+    let status: String
+    let project: String
+    let lastEventTs: Int
+    let usage: AgentUsageModel?
 }
 
 // MARK: - Usage bar (5 segments + percent text)
@@ -295,8 +308,8 @@ struct ClaudeCrabIcon: View {
 // MARK: - Notch view (collapsed state, matching Vibe Notch's pre-expansion look)
 
 struct NotchContentView: View {
-    @ObservedObject var model: StatusModel
-    @ObservedObject var usage: UsageModel
+    @ObservedObject var model: AgentStatusModel
+    @ObservedObject var usage: AgentUsageModel
     let collapsedSize: CGSize
     let expandedSize: CGSize
 
@@ -466,11 +479,13 @@ final class NotchPanel: NSPanel {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var panel: NotchPanel?
-    let model = StatusModel()
-    let usage = UsageModel()
+    let claudeStatus = AgentStatusModel(path: "\(NSHomeDirectory())/.claude/state/status")
+    let claudeUsage = AgentUsageModel(path: "\(NSHomeDirectory())/.claude/state/usage")
+    let codexStatus = AgentStatusModel(path: "\(NSHomeDirectory())/.codex/notchy/status")
+    let codexUsage = AgentUsageModel(path: "\(NSHomeDirectory())/.codex/notchy/usage")
     private var screenObserver: NSObjectProtocol?
     private var visibilityTimer: Timer?
-    private var modelCancellable: AnyCancellable?
+    private var visibilityCancellables = Set<AnyCancellable>()
 
     private let idleHideAfterSeconds: TimeInterval = 10 * 60
 
@@ -489,10 +504,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // React the instant the status file changes
-        modelCancellable = model.objectWillChange.sink { [weak self] _ in
+        // React the instant either status file changes.
+        claudeStatus.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.applyVisibility() }
         }
+        .store(in: &visibilityCancellables)
+
+        codexStatus.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async { self?.applyVisibility() }
+        }
+        .store(in: &visibilityCancellables)
 
         // Periodic check to hide after the idle window elapses with no new events
         visibilityTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
@@ -503,8 +524,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applyVisibility() {
         guard let panel else { return }
         let now = Int(Date().timeIntervalSince1970)
-        let age = now - model.lastEventTs
-        let shouldShow = model.lastEventTs > 0 && TimeInterval(age) < idleHideAfterSeconds
+        let newestEventTs = max(claudeStatus.lastEventTs, codexStatus.lastEventTs)
+        let age = now - newestEventTs
+        let shouldShow = newestEventTs > 0 && TimeInterval(age) < idleHideAfterSeconds
         if shouldShow {
             if !panel.isVisible { panel.orderFrontRegardless() }
         } else {
@@ -541,8 +563,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let p = NotchPanel(contentRect: frame, styleMask: [], backing: .buffered, defer: false)
         let host = NSHostingView(rootView: NotchContentView(
-            model: model,
-            usage: usage,
+            model: claudeStatus,
+            usage: claudeUsage,
             collapsedSize: collapsedSize,
             expandedSize: expandedSize
         ))
