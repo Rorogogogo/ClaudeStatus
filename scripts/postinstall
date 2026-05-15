@@ -107,7 +107,10 @@ events = {
     "PermissionRequest":  "input",
 }
 def is_ours(cmd):
-    return ("claude/sounds/peon-ping/play.sh" in cmd) or ("claude/notchy/play.sh" in cmd)
+    # Only match Notchy's own script. Hooks the user added themselves
+    # (e.g. a peon-ping sound script at ~/.claude/sounds/peon-ping/play.sh)
+    # must be preserved — we append alongside, never overwrite.
+    return "claude/notchy/play.sh" in cmd
 for event, arg in events.items():
     desired = f"{play_sh} {arg}"
     filtered = []
