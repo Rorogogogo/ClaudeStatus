@@ -4,7 +4,7 @@
 
 **Goal:** Add Codex status support so the collapsed Notchy indicator shows the newest agent and the expanded view shows Claude and Codex separately.
 
-**Architecture:** Generalize the existing Claude-only Swift state watchers into reusable agent models, render a two-agent expanded view, and add installer wiring for Codex hooks. Claude usage remains unchanged; Codex initially shows status/project only because Codex usage is not exposed through the same statusline feed.
+**Architecture:** Generalize the existing Claude-only Swift state watchers into reusable agent models, render a two-agent expanded view, and add installer wiring for Codex hooks. Claude usage remains written by the Claude statusline feed; Codex usage can be written separately from Codex session JSONL `rate_limits`.
 
 **Tech Stack:** Swift/AppKit/SwiftUI, Bash, Python 3 for installer JSON/TOML-safe text updates, macOS LaunchAgent packaging through `build.sh`.
 
@@ -143,11 +143,11 @@ config_path.parent.mkdir(parents=True, exist_ok=True)
 content = config_path.read_text() if config_path.exists() else ""
 
 if "[features]" not in content:
-    content = content.rstrip() + "\n\n[features]\ncodex_hooks = true\n"
-elif re.search(r"(?m)^\s*codex_hooks\s*=", content):
-    content = re.sub(r"(?m)^(\s*)codex_hooks\s*=.*$", r"\1codex_hooks = true", content)
+    content = content.rstrip() + "\n\n[features]\nhooks = true\n"
+elif re.search(r"(?m)^\s*hooks\s*=", content):
+    content = re.sub(r"(?m)^(\s*)hooks\s*=.*$", r"\1hooks = true", content)
 else:
-    content = re.sub(r"(?m)^(\[features\]\s*)$", r"\1\ncodex_hooks = true", content, count=1)
+    content = re.sub(r"(?m)^(\[features\]\s*)$", r"\1\nhooks = true", content, count=1)
 
 config_path.write_text(content)
 
@@ -524,7 +524,7 @@ Add bullets:
 Add:
 
 ```markdown
-- **Codex usage bars are not shown yet.** Codex lifecycle hooks provide status updates, but Codex does not expose the same statusline `rate_limits` feed that Claude Code provides.
+- **Codex usage bars are written from local session logs.** Codex lifecycle hooks provide status updates, and a helper can parse recent Codex session JSONL `rate_limits` events for usage.
 - **Codex hooks require a restart.** Restart any running Codex CLI session after installing or reconfiguring Notchy.
 ```
 
@@ -557,6 +557,5 @@ Expected: diff only contains Codex support and related docs.
 ## Self-Review
 
 - Spec coverage: collapsed newest-agent behavior is covered in Task 4; expanded two-agent rows are covered in Task 4; Codex hook/install setup is covered in Tasks 1 and 2; docs/build verification is covered in Task 5.
-- No Codex usage estimator is included because the approved design explicitly avoids fake usage numbers.
+- Codex usage should use real local `rate_limits` events rather than estimated token totals.
 - The plan preserves existing Claude behavior by reusing current state files, hook mappings, and usage parsing.
-

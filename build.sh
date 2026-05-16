@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-VERSION="1.2.1"
+VERSION="1.3.0"
 IDENTIFIER="com.notchy.app"
 APP_NAME="Notchy"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -25,6 +25,31 @@ mkdir -p "$BUILD" "$PKG_ROOT/Applications" "$APP_PATH/Contents/MacOS" "$APP_PATH
 echo "[1/5] Generating icons..."
 "$ROOT/scripts/build-icons.sh"
 cp "$BUILD/icons/AppIcon.icns" "$APP_PATH/Contents/Resources/AppIcon.icns"
+cp "$ROOT/assets/codex.svg" "$APP_PATH/Contents/Resources/codex.svg"
+cp "$ROOT/assets/github.svg" "$APP_PATH/Contents/Resources/github.svg"
+
+GITHUB_REPO="Rorogogogo/Notchy"
+GITHUB_URL="$(git -C "$ROOT" config --get remote.origin.url 2>/dev/null || true)"
+case "$GITHUB_URL" in
+  https://github.com/*)
+    GITHUB_REPO="${GITHUB_URL#https://github.com/}"
+    GITHUB_REPO="${GITHUB_REPO%.git}"
+    ;;
+  git@github.com:*)
+    GITHUB_REPO="${GITHUB_URL#git@github.com:}"
+    GITHUB_REPO="${GITHUB_REPO%.git}"
+    ;;
+esac
+GITHUB_WEB_URL="https://github.com/$GITHUB_REPO"
+GITHUB_STARS="$(
+  curl -fsSL -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$GITHUB_REPO" 2>/dev/null |
+    sed -n 's/.*"stargazers_count": \([0-9][0-9]*\).*/\1/p' |
+    head -n 1
+)"
+
+printf '%s\n' "$GITHUB_REPO" > "$APP_PATH/Contents/Resources/github-repo.txt"
+printf '%s\n' "$GITHUB_WEB_URL" > "$APP_PATH/Contents/Resources/github-url.txt"
+printf '%s\n' "${GITHUB_STARS:-—}" > "$APP_PATH/Contents/Resources/github-stars.txt"
 
 echo "[2/5] Compiling main.swift..."
 swiftc -O -target arm64-apple-macos14 \
@@ -51,7 +76,7 @@ cat > "$APP_PATH/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-echo "[4/5] Staging postinstall + play.sh + codex-play.sh into pkg scripts dir..."
+echo "[4/5] Staging postinstall + hook scripts into pkg scripts dir..."
 # Keep a copy in the .app Resources/ for users who want to inspect it.
 cp "$ROOT/play.sh" "$APP_PATH/Contents/Resources/play.sh"
 chmod +x "$APP_PATH/Contents/Resources/play.sh"
@@ -65,7 +90,8 @@ mkdir -p "$BUILD/scripts"
 cp "$ROOT/scripts/postinstall" "$BUILD/scripts/postinstall"
 cp "$ROOT/play.sh"             "$BUILD/scripts/play.sh"
 cp "$ROOT/codex-play.sh"       "$BUILD/scripts/codex-play.sh"
-chmod +x "$BUILD/scripts/postinstall" "$BUILD/scripts/play.sh" "$BUILD/scripts/codex-play.sh"
+cp "$ROOT/codex-usage.sh"      "$BUILD/scripts/codex-usage.sh"
+chmod +x "$BUILD/scripts/postinstall" "$BUILD/scripts/play.sh" "$BUILD/scripts/codex-play.sh" "$BUILD/scripts/codex-usage.sh"
 
 echo "[5/5] Building .pkg..."
 codesign --force --deep --sign - "$APP_PATH"

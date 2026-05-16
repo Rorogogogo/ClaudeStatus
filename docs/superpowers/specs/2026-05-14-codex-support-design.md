@@ -16,10 +16,10 @@ Notchy is currently Claude Code-specific:
 - The installer writes Claude Code hooks into `~/.claude/settings.json`.
 - The installer injects or registers a Claude statusline writer for usage data.
 
-Codex provides lifecycle hooks behind `codex_hooks = true`, which can drive the
+Codex provides lifecycle hooks behind `hooks = true`, which can drive the
 same status states as Claude Code. Codex usage data is not exposed through the
-same statusline mechanism; it may be parsed from Codex session JSONL in a later
-iteration if needed.
+same statusline mechanism, but recent Codex session JSONL includes
+`token_count.rate_limits` events that can drive the same usage file format.
 
 ## User Experience
 
@@ -33,9 +33,8 @@ Collapsed:
 Expanded:
 
 - Show a Claude row with status, project, and usage bars.
-- Show a Codex row with status and project.
-- Show Codex usage only if a reliable local source is available; otherwise keep
-  the Codex row status-focused and avoid fake or estimated numbers.
+- Show a Codex row with status, project, and usage bars when local Codex
+  `rate_limits` events are available.
 
 ## Data Model
 
@@ -80,9 +79,10 @@ Keep existing Claude setup unchanged.
 
 Add Codex setup:
 
-- Install a Codex hook script under `~/.codex/notchy/play.sh`.
+- Install Codex scripts under `~/.codex/notchy/play.sh` and
+  `~/.codex/notchy/usage.sh`.
 - Ensure `~/.codex/config.toml` exists.
-- Set `codex_hooks = true` without deleting unrelated user config.
+- Set `hooks = true` without deleting unrelated user config.
 - Add Codex lifecycle hook commands for:
   - `SessionStart` -> `start`
   - `UserPromptSubmit` -> `working`
@@ -113,4 +113,3 @@ Verification should cover:
 - Hook scripts write the expected status lines for representative JSON payloads.
 - Installer text generation remains idempotent for existing Claude setup.
 - Codex config changes preserve unrelated config values.
-

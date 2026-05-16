@@ -162,6 +162,75 @@ final class AgentUsageModel: ObservableObject {
     }
 }
 
+@MainActor
+final class GitHubRepoStatsModel: ObservableObject {
+    @Published var repoName: String = "Notchy"
+    @Published var repoURL: String = "https://github.com/Rorogogogo/Notchy"
+    @Published var starsText: String = "1"
+
+    private var repoSlug: String = "Rorogogogo/Notchy"
+    private var refreshTimer: Timer?
+
+    init() {
+        loadBundledValues()
+        startLiveRefresh()
+    }
+
+    private func loadBundledValues() {
+        if let bundledRepo = bundledString(named: "github-repo"), !bundledRepo.isEmpty {
+            repoName = bundledRepo
+            repoSlug = bundledRepo
+        }
+        if let bundledURL = bundledString(named: "github-url"), !bundledURL.isEmpty {
+            repoURL = bundledURL
+        }
+        if let bundledStars = bundledString(named: "github-stars"), !bundledStars.isEmpty {
+            starsText = Self.formatStars(Int(bundledStars) ?? 0)
+        }
+    }
+
+    private func startLiveRefresh() {
+        Task { await fetchStars() }
+        let timer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.fetchStars() }
+        }
+        timer.tolerance = 60
+        refreshTimer = timer
+    }
+
+    private func fetchStars() async {
+        guard let url = URL(string: "https://api.github.com/repos/\(repoSlug)") else { return }
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("Notchy", forHTTPHeaderField: "User-Agent")
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return }
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let count = json["stargazers_count"] as? Int else { return }
+            starsText = Self.formatStars(count)
+        } catch {
+            // keep bundled fallback
+        }
+    }
+
+    private func bundledString(named name: String) -> String? {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "txt"),
+              let raw = try? String(contentsOf: url, encoding: .utf8) else {
+            return nil
+        }
+        return raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func formatStars(_ count: Int) -> String {
+        if count >= 1000 {
+            let value = Double(count) / 1000.0
+            return String(format: "%.1fk", value)
+        }
+        return "\(count)"
+    }
+}
+
 enum AgentKind {
     case claude
     case codex
@@ -306,20 +375,42 @@ struct ClaudeCrabIcon: View {
 }
 
 struct CodexMark: View {
+    var size: CGFloat = 16
+
+    private var codexImage: NSImage? {
+        guard let url = Bundle.main.url(forResource: "codex", withExtension: "svg"),
+              let image = NSImage(contentsOf: url) else {
+            return nil
+        }
+        image.isTemplate = false
+        return image
+    }
+
     var body: some View {
-        Text("C")
-            .font(.system(size: 11, weight: .bold, design: .rounded))
-            .foregroundColor(.black)
-            .frame(width: 14, height: 14)
-            .background(Circle().fill(Color.white.opacity(0.9)))
+        Group {
+            if let codexImage {
+                Image(nsImage: codexImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+            } else {
+                Text("C")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(.black.opacity(0.78))
+                    .frame(width: size, height: size)
+                    .background(RoundedRectangle(cornerRadius: 3).fill(Color.white.opacity(0.92)))
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityLabel("Codex")
     }
 }
 
 // MARK: - Notch view (collapsed state, matching Vibe Notch's pre-expansion look)
 
-// Hover state driven externally (by a global mouse-location poll in
-// AppDelegate) so the panel can be fully click-through while still expanding
-// on hover.
+// Hover state is driven externally by a global mouse-location poll. The
+// collapsed notch remains click-through; the expanded panel becomes solid so
+// its controls can receive clicks.
 @MainActor
 final class PillHoverState: ObservableObject {
     @Published var hovering: Bool = false
@@ -330,6 +421,7 @@ struct NotchContentView: View {
     @ObservedObject var claudeUsage: AgentUsageModel
     @ObservedObject var codexStatus: AgentStatusModel
     @ObservedObject var codexUsage: AgentUsageModel
+    @StateObject private var repoStats = GitHubRepoStatsModel()
     let collapsedSize: CGSize
     let expandedSize: CGSize
     @ObservedObject var hoverState: PillHoverState
@@ -405,7 +497,7 @@ struct NotchContentView: View {
 
             pillView
                 .frame(width: currentSize.width, height: currentSize.height)
-                .allowsHitTesting(false)
+                .allowsHitTesting(hovering)
         }
         .frame(width: expandedSize.width, height: expandedSize.height, alignment: .top)
         .animation(.spring(response: 0.32, dampingFraction: 0.78), value: hovering)
@@ -418,7 +510,6 @@ struct NotchContentView: View {
                 bottomCornerRadius: hovering ? 22 : 14
             )
             .fill(Color.black)
-            .shadow(color: .black.opacity(hovering ? 0.35 : 0), radius: 18, y: 6)
 
             VStack(spacing: 0) {
                 // Top row: collapsed uses tight 14pt margins to hug the pill;
@@ -428,7 +519,7 @@ struct NotchContentView: View {
                     if activeSnapshot.kind == .claude {
                         ClaudeCrabIcon(size: 14)
                     } else {
-                        CodexMark()
+                        CodexMark(size: 15)
                     }
                     Spacer(minLength: 0)
                     Circle()
@@ -442,8 +533,8 @@ struct NotchContentView: View {
                 if hovering {
                     expandedDetail
                         .padding(.horizontal, 22)
-                        .padding(.top, 6)
-                        .padding(.bottom, 14)
+                        .padding(.top, 14)
+                        .padding(.bottom, 18)
                         .frame(width: currentSize.width)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
@@ -455,19 +546,112 @@ struct NotchContentView: View {
         VStack(alignment: .leading, spacing: 10) {
             agentRow(claudeSnapshot, showUsage: true)
             Divider().background(Color.white.opacity(0.12))
-            agentRow(codexSnapshot, showUsage: false)
-            HStack {
-                Spacer()
-                Button(action: { NSApp.terminate(nil) }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white.opacity(0.45))
-                }
-                .buttonStyle(.plain)
-                .help("Quit")
-            }
-            .padding(.top, 2)
+            agentRow(codexSnapshot, showUsage: true)
+            footerControls
+                .padding(.top, 4)
         }
+    }
+
+    private var footerControls: some View {
+        HStack(spacing: 8) {
+            repoButton {
+                openGitHub()
+            }
+            Spacer(minLength: 8)
+            footerButton(title: "Quit", systemImage: "xmark") {
+                NSApp.terminate(nil)
+            }
+        }
+    }
+
+    private static let githubMarkImage: NSImage? = {
+        guard let url = Bundle.main.url(forResource: "github", withExtension: "svg"),
+              let image = NSImage(contentsOf: url) else {
+            return nil
+        }
+        image.isTemplate = true
+        return image
+    }()
+
+    private func repoButton(action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                HStack(spacing: 5) {
+                    Group {
+                        if let mark = Self.githubMarkImage {
+                            Image(nsImage: mark)
+                                .resizable()
+                                .interpolation(.high)
+                                .aspectRatio(contentMode: .fit)
+                        } else {
+                            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                                .font(.system(size: 9.5, weight: .semibold))
+                        }
+                    }
+                    .frame(width: 11, height: 11)
+                    Text(repoStats.repoName)
+                        .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                        .lineLimit(1)
+                }
+
+                Rectangle()
+                    .fill(Color.white.opacity(0.12))
+                    .frame(width: 1, height: 12)
+
+                HStack(spacing: 4) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundColor(Color(red: 1.0, green: 0.78, blue: 0.24).opacity(0.9))
+                    Text(repoStats.starsText)
+                        .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                }
+            }
+            .foregroundColor(.white.opacity(0.68))
+            .padding(.horizontal, 10)
+            .frame(height: 22)
+            .background(
+                Capsule()
+                    .fill(Color.white.opacity(0.08))
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
+                    )
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("Open GitHub")
+    }
+
+    private func footerButton(title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 9.5, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+            }
+            .foregroundColor(.white.opacity(0.66))
+            .padding(.horizontal, 9)
+            .frame(height: 22)
+            .background(
+                Capsule()
+                    .fill(Color.white.opacity(0.08))
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
+                    )
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(title)
+    }
+
+    private func openGitHub() {
+        guard let url = URL(string: repoStats.repoURL) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func agentRow(_ snapshot: AgentSnapshot, showUsage: Bool) -> some View {
@@ -476,8 +660,7 @@ struct NotchContentView: View {
                 if snapshot.kind == .claude {
                     ClaudeCrabIcon(size: 12)
                 } else {
-                    CodexMark()
-                        .scaleEffect(0.86)
+                    CodexMark(size: 13)
                 }
                 Text(snapshot.name)
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
@@ -528,8 +711,8 @@ final class NotchPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = false
         isMovable = false
-        // Fully click-through; hover is detected via a global mouse-location
-        // poll in AppDelegate, not via panel-local mouse events.
+        // Collapsed starts click-through; AppDelegate toggles this off while
+        // expanded so the Quit button and future controls are clickable.
         ignoresMouseEvents = true
         level = .init(Int(CGWindowLevelForKey(.mainMenuWindow)) + 3)
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
@@ -553,7 +736,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var visibilityTimer: Timer?
     private var visibilityCancellables = Set<AnyCancellable>()
 
-    // Hover detection (panel is click-through, so we poll the global cursor).
+    // Hover detection is global so collapsed can stay click-through.
     private var hoverState = PillHoverState()
     private var hoverTimer: Timer?
     private var collapsedScreenRect: CGRect = .zero
@@ -604,17 +787,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateHover() {
         guard let panel, panel.isVisible else {
-            if hoverState.hovering { hoverState.hovering = false }
+            if hoverState.hovering { setHovering(false) }
             return
         }
         let p = NSEvent.mouseLocation  // screen coords, bottom-left origin
         if hoverState.hovering {
             // Stay expanded as long as cursor is inside the expanded rect.
-            if !expandedScreenRect.contains(p) { hoverState.hovering = false }
+            if !expandedScreenRect.contains(p) { setHovering(false) }
         } else {
             // Trigger expansion only when cursor enters the small collapsed pill.
-            if collapsedScreenRect.contains(p) { hoverState.hovering = true }
+            if collapsedScreenRect.contains(p) { setHovering(true) }
         }
+    }
+
+    private func setHovering(_ hovering: Bool) {
+        hoverState.hovering = hovering
+        panel?.ignoresMouseEvents = !hovering
     }
 
     func applyVisibility() {
@@ -646,8 +834,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         // Expanded pill: wider for the weekly bar + labels, taller for the detail block.
         let expandedSize = CGSize(
-            width:  max(360, collapsedSize.width + 60),
-            height: collapsedSize.height + 180
+            width:  max(390, collapsedSize.width + 90),
+            height: collapsedSize.height + 252
         )
 
         let frame = NSRect(
@@ -658,7 +846,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         let p = NotchPanel(contentRect: frame, styleMask: [], backing: .buffered, defer: false)
-        hoverState.hovering = false
+        setHovering(false)
         let host = NSHostingView(rootView: NotchContentView(
             claudeStatus: claudeStatus,
             claudeUsage: claudeUsage,
