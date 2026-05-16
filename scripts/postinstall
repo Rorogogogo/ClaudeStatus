@@ -32,6 +32,7 @@ CODEX_NOTCHY_DIR="$CODEX_DIR/notchy"
 CODEX_CONFIG_FILE="$CODEX_DIR/config.toml"
 CODEX_HOOKS_FILE="$CODEX_DIR/hooks.json"
 CODEX_PLAY_SH="$CODEX_NOTCHY_DIR/play.sh"
+CODEX_USAGE_SH="$CODEX_NOTCHY_DIR/usage.sh"
 LAUNCH_AGENT_DIR="$TARGET_HOME/Library/LaunchAgents"
 APP_LAUNCH_AGENT="$LAUNCH_AGENT_DIR/com.notchy.app.plist"
 APP_BIN="/Applications/Notchy.app/Contents/MacOS/Notchy"
@@ -47,6 +48,8 @@ cp "$SCRIPT_DIR/play.sh" "$PLAY_SH"
 chmod +x "$PLAY_SH"
 cp "$SCRIPT_DIR/codex-play.sh" "$CODEX_PLAY_SH"
 chmod +x "$CODEX_PLAY_SH"
+cp "$SCRIPT_DIR/codex-usage.sh" "$CODEX_USAGE_SH"
+chmod +x "$CODEX_USAGE_SH"
 
 # Minimal standalone statusline script — used when the user has no
 # existing one. It silently writes live rate-limits and prints nothing.
@@ -222,9 +225,9 @@ for idx, line in enumerate(lines):
 
 if features_start is None:
     if content.strip():
-        lines.extend(["", "[features]", "codex_hooks = true"])
+        lines.extend(["", "[features]", "hooks = true"])
     else:
-        lines.extend(["[features]", "codex_hooks = true"])
+        lines.extend(["[features]", "hooks = true"])
 else:
     features_end = len(lines)
     for idx in range(features_start + 1, len(lines)):
@@ -232,20 +235,30 @@ else:
             features_end = idx
             break
 
-    codex_hooks_idx = None
+    hooks_idx = None
+    deprecated_idx = None
     for idx in range(features_start + 1, features_end):
-        if re.match(r"^\s*codex_hooks\s*=", lines[idx]):
-            codex_hooks_idx = idx
-            break
+        if re.match(r"^\s*hooks\s*=", lines[idx]):
+            hooks_idx = idx
+        elif re.match(r"^\s*codex_hooks\s*=", lines[idx]):
+            deprecated_idx = idx
 
-    if codex_hooks_idx is None:
-        lines.insert(features_start + 1, "codex_hooks = true")
-    else:
-        lines[codex_hooks_idx] = re.sub(
+    if hooks_idx is None and deprecated_idx is None:
+        lines.insert(features_start + 1, "hooks = true")
+    elif hooks_idx is None:
+        lines[deprecated_idx] = re.sub(
             r"^(\s*)codex_hooks\s*=.*$",
-            r"\1codex_hooks = true",
-            lines[codex_hooks_idx],
+            r"\1hooks = true",
+            lines[deprecated_idx],
         )
+    else:
+        lines[hooks_idx] = re.sub(
+            r"^(\s*)hooks\s*=.*$",
+            r"\1hooks = true",
+            lines[hooks_idx],
+        )
+        if deprecated_idx is not None:
+            del lines[deprecated_idx]
 
 content = "\n".join(lines) + "\n"
 

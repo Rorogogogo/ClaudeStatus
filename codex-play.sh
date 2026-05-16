@@ -33,4 +33,9 @@ fi
 
 ts=$(date +%s)
 printf '%s\t%s\t%s\n' "$status" "$ts" "$project" > "$STATE_DIR/status"
+
+if [ -x "$STATE_DIR/usage.sh" ]; then
+  "$STATE_DIR/usage.sh" >/dev/null 2>&1 &
+fi
+
 exit 0
