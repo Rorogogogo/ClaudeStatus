@@ -51,10 +51,15 @@ printf '%s\n' "$GITHUB_REPO" > "$APP_PATH/Contents/Resources/github-repo.txt"
 printf '%s\n' "$GITHUB_WEB_URL" > "$APP_PATH/Contents/Resources/github-url.txt"
 printf '%s\n' "${GITHUB_STARS:-—}" > "$APP_PATH/Contents/Resources/github-stars.txt"
 
-echo "[2/5] Compiling main.swift..."
+echo "[2/5] Compiling Swift sources..."
+SWIFT_SOURCES=()
+while IFS= read -r source_file; do
+  SWIFT_SOURCES+=("$source_file")
+done < <(find "$ROOT/Sources/Notchy" -name '*.swift' -print | sort)
+
 swiftc -O -target arm64-apple-macos14 \
   -o "$APP_PATH/Contents/MacOS/$APP_NAME" \
-  "$ROOT/main.swift"
+  "${SWIFT_SOURCES[@]}"
 
 echo "[3/5] Writing Info.plist..."
 cat > "$APP_PATH/Contents/Info.plist" <<EOF
