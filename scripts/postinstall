@@ -265,15 +265,15 @@ content = "\n".join(lines) + "\n"
 config_path.write_text(content)
 
 events = {
-    "SessionStart": "start",
-    "UserPromptSubmit": "working",
-    "PreToolUse": "working",
-    "PostToolUse": "working",
-    "PostToolUseFailure": "working",
-    "Stop": "complete",
-    "StopFailure": "complete",
-    "Notification": "input",
-    "PermissionRequest": "input",
+    "SessionStart": ("start", "Notchy: mark Codex active"),
+    "UserPromptSubmit": ("working", "Notchy: mark Codex working"),
+    "PreToolUse": ("working", "Notchy: mark Codex working before tool use"),
+    "PostToolUse": ("working", "Notchy: keep Codex marked working after tool use"),
+    "PostToolUseFailure": ("working", "Notchy: keep Codex marked working after tool failure"),
+    "Stop": ("complete", "Notchy: mark Codex idle"),
+    "StopFailure": ("complete", "Notchy: mark Codex idle after failed turn"),
+    "Notification": ("input", "Notchy: mark Codex waiting for input"),
+    "PermissionRequest": ("input", "Notchy: mark Codex waiting for permission"),
 }
 
 try:
@@ -286,7 +286,7 @@ hooks = data.setdefault("hooks", {})
 def is_ours(command):
     return "/.codex/notchy/play.sh" in command
 
-for event, arg in events.items():
+for event, (arg, status_message) in events.items():
     desired = f"{play_sh} {arg}"
     filtered = []
     for group in hooks.get(event, []):
@@ -295,7 +295,7 @@ for event, arg in events.items():
             new_group = {k: v for k, v in group.items() if k != "hooks"}
             new_group["hooks"] = kept
             filtered.append(new_group)
-    entry = {"hooks": [{"type": "command", "command": desired}]}
+    entry = {"hooks": [{"type": "command", "command": desired, "statusMessage": status_message}]}
     if event in ("PermissionRequest", "PreToolUse", "PostToolUse", "PostToolUseFailure"):
         entry["matcher"] = "*"
     filtered.append(entry)
