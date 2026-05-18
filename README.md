@@ -222,7 +222,22 @@ For Codex, remove the Notchy hook entries from `~/.codex/hooks.json` (they refer
 
 ## 📄 License
 
-MIT. See [LICENSE](LICENSE).
+Notchy is **dual-licensed**:
+
+- 🆓 **AGPL-3.0** — free for personal use, open-source forks, and any project that is itself open-sourced under a compatible license. See [LICENSE](LICENSE).
+- 💼 **Commercial license** — required if you want to use Notchy (or a derivative) in a **closed-source product**, a **proprietary internal tool you don't intend to open-source**, or a **paid service** where AGPL-3.0's copyleft / network-use obligations don't fit. See [COMMERCIAL.md](COMMERCIAL.md).
+
+### Quick guide — do I need a commercial license?
+
+| Use case | License you need |
+|---|---|
+| Running Notchy on your own Mac as an end user | AGPL-3.0 (free) |
+| Forking Notchy and publishing your fork under AGPL-3.0 | AGPL-3.0 (free) |
+| Bundling Notchy (or its code) into a closed-source app you sell | **Commercial** |
+| Running a modified Notchy as part of a SaaS / hosted service without publishing the source | **Commercial** |
+| Internal company tool built on Notchy that your employer won't open-source | **Commercial** |
+
+For commercial licensing, contact **Robert Wang** at **xwang.robert@gmail.com** — see [COMMERCIAL.md](COMMERCIAL.md) for what to include in your request.
 
 ## 🙏 Credits
 
