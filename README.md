@@ -1,41 +1,84 @@
-<p align="center">
-  <img src="assets/logo.png" width="128" height="128" alt="Notchy logo" />
-</p>
+<div align="center">
+
+<img src="assets/logo.png" width="140" height="140" alt="Notchy logo" />
 
 # Notchy
 
-A tiny, native macOS status indicator for [Claude Code](https://docs.claude.com/en/docs/claude-code) and Codex — sits next to your camera in the notch, turns 🟢 / 🟡 / ⚪ as the agent works / waits / idles, and unfolds on hover to show live 5h and weekly usage. When both agents are configured, collapsed mode shows whichever agent updated most recently.
+**A tiny, native macOS notch indicator for [Claude Code](https://docs.claude.com/en/docs/claude-code) and Codex.**
 
-Built as a lightweight alternative to heavier "Dynamic Island for Claude" tools. Single Swift binary, no Electron, no Python, no background watchers spinning at 60 Hz.
+Glance at your notch. Know if your agent is working, waiting on you, or idle.
+Hover for live 5h / weekly usage — the exact numbers `/usage` would show.
 
-### [⬇️ Download Notchy.pkg (v1.1.0)](https://github.com/Rorogogogo/Notchy/releases/latest/download/Notchy.pkg)
+<p>
+  <a href="https://github.com/Rorogogogo/Notchy/stargazers"><img src="https://img.shields.io/github/stars/Rorogogogo/Notchy?style=for-the-badge&logo=github&color=FFD166&labelColor=1a1a1a" alt="GitHub stars" /></a>
+  <a href="https://github.com/Rorogogogo/Notchy/releases/latest"><img src="https://img.shields.io/github/v/release/Rorogogogo/Notchy?style=for-the-badge&color=06D6A0&labelColor=1a1a1a" alt="Latest release" /></a>
+  <a href="https://github.com/Rorogogogo/Notchy/releases"><img src="https://img.shields.io/github/downloads/Rorogogogo/Notchy/total?style=for-the-badge&color=118AB2&labelColor=1a1a1a" alt="Downloads" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Rorogogogo/Notchy?style=for-the-badge&color=EF476F&labelColor=1a1a1a" alt="License" /></a>
+  <img src="https://img.shields.io/badge/macOS-14%2B-black?style=for-the-badge&logo=apple&logoColor=white&labelColor=1a1a1a" alt="macOS 14+" />
+  <img src="https://img.shields.io/badge/Swift-native-F05138?style=for-the-badge&logo=swift&logoColor=white&labelColor=1a1a1a" alt="Swift native" />
+</p>
 
-## Why this exists
+### [⬇️ Download Notchy.pkg](https://github.com/Rorogogogo/Notchy/releases/latest/download/Notchy.pkg) &nbsp;·&nbsp; [📦 Releases](https://github.com/Rorogogogo/Notchy/releases) &nbsp;·&nbsp; [🐛 Issues](https://github.com/Rorogogogo/Notchy/issues)
 
-A passive, glance-and-go indicator. No clickable widgets, no chat history, no background animations spinning at 60 Hz — just a tiny pill that tells you whether the agent is working, waiting on you, or idle, plus a hover-expansion with the actual quota numbers `/usage` would show.
+</div>
 
-Measured on an M-series MacBook Pro:
+---
 
-- **~0.1 % idle CPU** — between events, only a 250 ms `stat()` poll and a 1 s tick timer
-- **~32 MB RSS** — single native binary, no framework runtime overhead
-- **~220 KB binary** — compact Swift, links against the system AppKit / SwiftUI
-- **Event-driven** via `kqueue` (`DispatchSource.makeFileSystemObjectSource`), not per-frame redraws
+## ✨ Highlights
 
-## What it shows
+- 🟢 **Live agent status** — green = working · yellow = waiting on you · gray = idle
+- 📊 **Real usage, not estimates** — same numbers Claude Code's `/usage` shows, with reset countdowns
+- 🤝 **Dual agent support** — Claude Code **and** Codex in the same pill
+- 🪶 **Featherweight** — ~0.1 % idle CPU, ~32 MB RSS, ~220 KB binary
+- 🛜 **Zero network calls** — everything is file-watched locally via `kqueue`
+- 🌗 **Native macOS** — single Swift binary, no Electron, no Python, no 60 Hz redraw loops
+- 👻 **Stays out of the way** — auto-hides after 10 min, reappears the instant a hook fires
 
-- A small black notch-shaped pill, slightly wider than the physical notch
-- 🦀 Coral Claude-style crab on the left
+<br />
+
+## 🪟 What it looks like
+
+A small black notch-shaped pill, slightly wider than the physical notch:
+
+- 🦀 Coral Claude-style crab on the left (or the Codex mark, when Codex was the latest to update)
 - A colored status dot on the right:
   - 🟢 **green** — working (you sent a prompt, agent is generating or running a tool)
   - 🟡 **yellow** — waiting on you (permission prompt or other input)
   - ⚪ **gray** — idle (last turn finished cleanly)
-- Hover the pill to expand Dynamic-Island-style and reveal:
-  - **5h block** usage with a 16-segment bar and reset countdown
-  - **This week** usage with a 16-segment bar and reset countdown
-  - Current project + status, with a one-click quit button
-- Hides itself completely after 10 minutes of no activity, reappears the instant any configured Claude Code or Codex agent hook fires.
 
-## Live Usage Data
+Hover the pill to expand Dynamic-Island-style and reveal:
+
+- **5h block** usage with a 16-segment bar and reset countdown
+- **This week** usage with a 16-segment bar and reset countdown
+- Current project + status, with a one-click quit button
+
+<br />
+
+## ⚖️ How Notchy compares
+
+There are a few notch-style "vibe coding" indicators out there. Here's how Notchy stacks up against the rough category average — no names, just patterns we've seen.
+
+| | **Notchy** | Typical notch indicator |
+|---|---|---|
+| Runtime | Single native Swift binary | Electron / web view / Python wrapper |
+| Idle CPU | ~0.1 % | 2 – 10 % (per-frame redraws, polling loops) |
+| Memory | ~32 MB RSS | 150 – 400 MB |
+| Binary size | ~220 KB | 80 – 250 MB |
+| Update mechanism | `kqueue` file watch, event-driven | Timer polling, often 1 – 60 Hz |
+| Usage numbers | Real `/usage` values via statusline JSON | Estimated, scraped, or absent |
+| Network calls | None | Often polls a vendor API |
+| Reset countdowns | ✅ Exact (from server) | ❌ or approximate |
+| Dual-agent (Claude Code + Codex) | ✅ Both, side by side | Usually one only |
+| Notch-shape geometry | Matches Dynamic Island curves | Often a flat rectangle floating below |
+| Auto-hide when idle | ✅ After 10 min, instant wake on hook | Often always-on |
+| Click-through outside pill | ✅ Hit-tested to the visible shape | ❌ Whole bounding box blocks clicks |
+| Install footprint | One `.pkg`, scripts under `~/.claude` & `~/.codex` | App + helper daemons + login items |
+
+The short version: most existing tools are great-looking demos built on web stacks. Notchy is what you'd build if you wanted the same idea to disappear into the OS — quiet, native, and accurate.
+
+<br />
+
+## 📈 Live usage data
 
 The 5h-block and weekly percentages are **the same numbers** Claude Code's built-in `/usage` shows — including the precise reset times. Notchy doesn't estimate, it doesn't poll Anthropic, it doesn't need an admin API key.
 
@@ -48,13 +91,15 @@ It works by tapping the JSON Claude Code already pipes to your **statusline comm
 }
 ```
 
-Notchy's installer adds a 10-line writer block to your `~/.claude/statusline-command.sh` (or creates a minimal one if you have none) that extracts those fields into `~/.claude/state/usage`. The app file-watches that path with `kqueue` and re-renders the bars when it changes. Zero polling, zero network calls.
+Notchy's installer adds a 10-line writer block to your `~/.claude/statusline-command.sh` (or creates a minimal one if you have none) that extracts those fields into `~/.claude/state/usage`. The app file-watches that path with `kqueue` and re-renders the bars when it changes. **Zero polling, zero network calls.**
 
 Numbers refresh on every statusline render (i.e. while a TUI is active). When no TUI is open, the last known numbers stay on screen until the next render.
 
 For Codex, Notchy reads the latest local session `token_count` event that includes `rate_limits`, then writes the same usage format to `~/.codex/notchy/usage`. This gives the Codex row its own 5h and weekly usage bars without network calls.
 
-## Requirements
+<br />
+
+## 📦 Requirements
 
 - macOS 14 (Sonoma) or later
 - A MacBook with a notch (M-series 14"/16" Pro, M3 Air, etc.)
@@ -62,7 +107,9 @@ For Codex, Notchy reads the latest local session `token_count` event that includ
 - `jq` on `PATH` (preinstalled on most dev machines; `brew install jq` if missing)
 - For building from source: Xcode Command Line Tools (`xcode-select --install`)
 
-## Install (from the .pkg)
+<br />
+
+## 🚀 Install (from the .pkg)
 
 1. Download `Notchy.pkg` from the [Releases](https://github.com/Rorogogogo/Notchy/releases) page.
 2. Double-click. macOS will show "Notchy.pkg cannot be opened because it is from an unidentified developer."
@@ -87,7 +134,9 @@ The installer's postinstall script will:
 
 Re-running the installer is safe — hooks and writer blocks are detected by marker comments and replaced, not duplicated.
 
-## Build from source
+<br />
+
+## 🛠️ Build from source
 
 ```bash
 git clone https://github.com/Rorogogogo/Notchy.git
@@ -99,7 +148,9 @@ Outputs:
 - `build/pkg-root/Applications/Notchy.app` — the standalone app
 - `build/Notchy.pkg` — the installer
 
-## How it works
+<br />
+
+## 🔬 How it works
 
 Six pieces:
 
@@ -119,9 +170,11 @@ Six pieces:
    - File-watches Claude Code status/usage and Codex status/usage with `DispatchSource.makeFileSystemObjectSource` (kqueue under the hood). Re-renders only when the kernel fires `VNODE_WRITE`.
    - Hover detection constrained to the visible pill shape via `.contentShape(NotchShape(...))`, so transparent areas around the pill don't block clicks to apps below.
    - Spring-animated expansion: ~0.32 s response, 0.78 damping.
-   - Auto-expires `waiting` → `idle` after 3 s (see [Caveats](#caveats)).
+   - Auto-expires `waiting` → `idle` after 3 s (see [Caveats](#-caveats)).
 
-## Hooks installed
+<br />
+
+## 🪝 Hooks installed
 
 | Claude Code event | Sets status to |
 |---|---|
@@ -135,7 +188,9 @@ Six pieces:
 | `Notification` | waiting |
 | `PermissionRequest` | waiting |
 
-## Caveats
+<br />
+
+## ⚠️ Caveats
 
 - **No hook fires when the user denies a permission prompt** ([per the docs](https://docs.claude.com/en/docs/claude-code/hooks)). Notchy handles this by auto-expiring `waiting` → `idle` after 3 seconds with no further events.
 - **Live usage only refreshes while a TUI is active.** Anthropic only sends `rate_limits` in the statusline JSON during an interactive session. When no `claude` TUI is open, the bars freeze at the last known values until the next render.
@@ -147,7 +202,9 @@ Six pieces:
 - **First-launch Gatekeeper warning.** The `.pkg` isn't notarized — Privacy & Security → "Open Anyway" the first time.
 - **Notch-only.** Older / non-notch displays still get a pill at the top center, but it looks less like a natural notch extension.
 
-## Uninstall
+<br />
+
+## 🧹 Uninstall
 
 ```bash
 launchctl bootout "gui/$(id -u)/com.notchy.app" 2>/dev/null
@@ -161,10 +218,22 @@ Then strip the writer block from `~/.claude/statusline-command.sh` (look for the
 
 For Codex, remove the Notchy hook entries from `~/.codex/hooks.json` (they reference `~/.codex/notchy/play.sh`). The `hooks = true` setting in `~/.codex/config.toml` can be left enabled if you use other Codex hooks, or removed if Notchy was the only reason it was enabled.
 
-## License
+<br />
+
+## 📄 License
 
 MIT. See [LICENSE](LICENSE).
 
-## Credits
+## 🙏 Credits
 
 Notch shape geometry and the crab icon concept inspired by [farouqaldori/vibe-notch](https://github.com/farouqaldori/vibe-notch) (Apache 2.0). Codex uses OpenAI's 2025 symbol.
+
+<br />
+
+<div align="center">
+
+If Notchy makes your notch a little more useful, consider giving it a ⭐ — it really helps.
+
+<a href="https://github.com/Rorogogogo/Notchy/stargazers"><img src="https://img.shields.io/github/stars/Rorogogogo/Notchy?style=social" alt="Star on GitHub" /></a>
+
+</div>
