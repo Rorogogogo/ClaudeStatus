@@ -23,10 +23,6 @@ final class AgentStatusModel: ObservableObject {
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             self?.pollIfChanged()
         }
-        // Periodic re-publish so age-based UI checks (waiting → idle) update without new events
-        tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            DispatchQueue.main.async { self?.objectWillChange.send() }
-        }
     }
 
     private func pollIfChanged() {
@@ -61,6 +57,22 @@ final class AgentStatusModel: ObservableObject {
         if parts.indices.contains(0) { status = parts[0] }
         if parts.indices.contains(1) { lastEventTs = Int(parts[1]) ?? 0 }
         if parts.indices.contains(2) { project = parts[2] }
+        
+        // Dynamic wait-state expiration setup
+        if status == "waiting" {
+            let age = Int(Date().timeIntervalSince1970) - lastEventTs
+            let remaining = max(0.1, 3.1 - Double(age))
+            tickTimer?.invalidate()
+            tickTimer = Timer.scheduledTimer(withTimeInterval: remaining, repeats: false) { [weak self] _ in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.objectWillChange.send()
+                }
+            }
+        } else {
+            tickTimer?.invalidate()
+            tickTimer = nil
+        }
     }
 
     private func watchFile() {
