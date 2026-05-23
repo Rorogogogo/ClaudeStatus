@@ -16,6 +16,8 @@ struct NotchContentView: View {
     @ObservedObject var claudeUsage: AgentUsageModel
     @ObservedObject var codexStatus: AgentStatusModel
     @ObservedObject var codexUsage: AgentUsageModel
+    @ObservedObject var antigravityStatus: AgentStatusModel
+    @ObservedObject var antigravityUsage: AgentUsageModel
     @StateObject private var repoStats = GitHubRepoStatsModel()
     let collapsedSize: CGSize
     let expandedSize: CGSize

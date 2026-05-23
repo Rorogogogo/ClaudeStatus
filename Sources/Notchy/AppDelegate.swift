@@ -11,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let claudeUsage = AgentUsageModel(path: "\(NSHomeDirectory())/.claude/state/usage")
     let codexStatus = AgentStatusModel(path: "\(NSHomeDirectory())/.codex/notchy/status")
     let codexUsage = AgentUsageModel(path: "\(NSHomeDirectory())/.codex/notchy/usage")
+    let antigravityStatus = AgentStatusModel(path: "\(NSHomeDirectory())/.gemini/notchy/status")
+    let antigravityUsage = AgentUsageModel(path: "\(NSHomeDirectory())/.gemini/notchy/usage")
     private var screenObserver: NSObjectProtocol?
     private var visibilityTimer: Timer?
     private var visibilityCancellables = Set<AnyCancellable>()
@@ -45,6 +47,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         .store(in: &visibilityCancellables)
 
         codexStatus.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async { self?.applyVisibility() }
+        }
+        .store(in: &visibilityCancellables)
+
+        antigravityStatus.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.applyVisibility() }
         }
         .store(in: &visibilityCancellables)
@@ -87,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applyVisibility() {
         guard let panel else { return }
         let now = Int(Date().timeIntervalSince1970)
-        let newestEventTs = max(claudeStatus.lastEventTs, codexStatus.lastEventTs)
+        let newestEventTs = max(max(claudeStatus.lastEventTs, codexStatus.lastEventTs), antigravityStatus.lastEventTs)
         let age = now - newestEventTs
         let shouldShow = newestEventTs > 0 && TimeInterval(age) < idleHideAfterSeconds
         if shouldShow {
@@ -114,7 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Expanded pill: wider for the weekly bar + labels, taller for the detail block.
         let expandedSize = CGSize(
             width:  max(390, collapsedSize.width + 90),
-            height: collapsedSize.height + 252
+            height: collapsedSize.height + 252 + 52
         )
 
         let frame = NSRect(
@@ -131,6 +138,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             claudeUsage: claudeUsage,
             codexStatus: codexStatus,
             codexUsage: codexUsage,
+            antigravityStatus: antigravityStatus,
+            antigravityUsage: antigravityUsage,
             collapsedSize: collapsedSize,
             expandedSize: expandedSize,
             hoverState: hoverState
