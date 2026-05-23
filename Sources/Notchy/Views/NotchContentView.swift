@@ -147,7 +147,7 @@ struct NotchContentView: View {
                         .padding(.top, 14)
                         .padding(.bottom, 18)
                         .frame(width: currentSize.width)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .transition(.opacity)
                 }
             }
         }
