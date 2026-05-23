@@ -47,8 +47,20 @@ struct NotchContentView: View {
         )
     }
 
+    private var antigravitySnapshot: AgentSnapshot {
+        AgentSnapshot(
+            kind: .antigravity,
+            name: "Antigravity",
+            status: effectiveStatus(for: antigravityStatus),
+            project: antigravityStatus.project,
+            lastEventTs: antigravityStatus.lastEventTs,
+            usage: antigravityUsage
+        )
+    }
+
     private var activeSnapshot: AgentSnapshot {
-        codexSnapshot.lastEventTs > claudeSnapshot.lastEventTs ? codexSnapshot : claudeSnapshot
+        let list = [claudeSnapshot, codexSnapshot, antigravitySnapshot]
+        return list.max(by: { $0.lastEventTs < $1.lastEventTs }) ?? claudeSnapshot
     }
 
     private func effectiveStatus(for model: AgentStatusModel) -> String {
@@ -115,8 +127,10 @@ struct NotchContentView: View {
                     Spacer().frame(width: hovering ? 22 : 14)
                     if activeSnapshot.kind == .claude {
                         ClaudeCrabIcon(size: 14)
-                    } else {
+                    } else if activeSnapshot.kind == .codex {
                         CodexMark(size: 15)
+                    } else {
+                        AntigravityMark(size: 14)
                     }
                     Spacer(minLength: 0)
                     Circle()
@@ -144,6 +158,8 @@ struct NotchContentView: View {
             agentRow(claudeSnapshot, showUsage: true)
             Divider().background(Color.white.opacity(0.12))
             agentRow(codexSnapshot, showUsage: true)
+            Divider().background(Color.white.opacity(0.12))
+            agentRow(antigravitySnapshot, showUsage: false)
             footerControls
                 .padding(.top, 4)
         }
@@ -256,8 +272,10 @@ struct NotchContentView: View {
             HStack(spacing: 8) {
                 if snapshot.kind == .claude {
                     ClaudeCrabIcon(size: 12)
-                } else {
+                } else if snapshot.kind == .codex {
                     CodexMark(size: 13)
+                } else {
+                    AntigravityMark(size: 12)
                 }
                 Text(snapshot.name)
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
