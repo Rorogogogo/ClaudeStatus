@@ -398,14 +398,23 @@ UID_NUM="$(id -u "$TARGET_USER")"
 
 # Bootout legacy agents from prior versions
 for legacy_label in com.claudestatus.app com.notchy.usage; do
-  sudo -u "$TARGET_USER" launchctl bootout "gui/$UID_NUM/$legacy_label" 2>/dev/null || true
+  if [ "$(id -u)" -eq 0 ]; then
+    sudo -u "$TARGET_USER" launchctl bootout "gui/$UID_NUM/$legacy_label" 2>/dev/null || true
+  else
+    launchctl bootout "gui/$UID_NUM/$legacy_label" 2>/dev/null || true
+  fi
 done
 rm -f "$LEGACY_AGENT_APP" "$LEGACY_TICK_AGENT"
 pkill -x ClaudeStatus 2>/dev/null || true
 
 # (Re)load our agent
-sudo -u "$TARGET_USER" launchctl bootout    "gui/$UID_NUM/com.notchy.app" 2>/dev/null || true
-sudo -u "$TARGET_USER" launchctl bootstrap  "gui/$UID_NUM" "$APP_LAUNCH_AGENT" || true
+if [ "$(id -u)" -eq 0 ]; then
+  sudo -u "$TARGET_USER" launchctl bootout    "gui/$UID_NUM/com.notchy.app" 2>/dev/null || true
+  sudo -u "$TARGET_USER" launchctl bootstrap  "gui/$UID_NUM" "$APP_LAUNCH_AGENT" || true
+else
+  launchctl bootout    "gui/$UID_NUM/com.notchy.app" 2>/dev/null || true
+  launchctl bootstrap  "gui/$UID_NUM" "$APP_LAUNCH_AGENT" || true
+fi
 
 echo "postinstall: done."
 exit 0
