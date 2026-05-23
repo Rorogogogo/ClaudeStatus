@@ -4,18 +4,18 @@ import SwiftUI
 struct CodexMark: View {
     var size: CGFloat = 16
 
-    private var codexImage: NSImage? {
+    private static let cachedImage: NSImage? = {
         guard let url = Bundle.main.url(forResource: "codex", withExtension: "svg"),
               let image = NSImage(contentsOf: url) else {
             return nil
         }
         image.isTemplate = false
         return image
-    }
+    }()
 
     var body: some View {
         Group {
-            if let codexImage {
+            if let codexImage = Self.cachedImage {
                 Image(nsImage: codexImage)
                     .resizable()
                     .interpolation(.high)
