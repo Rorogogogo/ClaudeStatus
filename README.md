@@ -4,7 +4,7 @@
 
 # Notchy
 
-**A tiny, native macOS notch indicator for [Claude Code](https://docs.claude.com/en/docs/claude-code) and Codex.**
+**A tiny, native macOS notch indicator for [Claude Code](https://docs.claude.com/en/docs/claude-code), Codex, and Antigravity.**
 
 Glance at your notch. Know if your agent is working, waiting on you, or idle.
 Hover for live 5h / weekly usage — the exact numbers `/usage` would show.
@@ -28,7 +28,7 @@ Hover for live 5h / weekly usage — the exact numbers `/usage` would show.
 
 - 🟢 **Live agent status** — green = working · yellow = waiting on you · gray = idle
 - 📊 **Real usage, not estimates** — same numbers Claude Code's `/usage` shows, with reset countdowns
-- 🤝 **Dual agent support** — Claude Code **and** Codex in the same pill
+- 🤝 **Multi-agent support** — Claude Code, Codex, **and** Antigravity (Gemini CLI) in the same pill
 - 🪶 **Featherweight** — ~0.1 % idle CPU, ~32 MB RSS, ~220 KB binary
 - 🛜 **Zero network calls** — everything is file-watched locally via `kqueue`
 - 🌗 **Native macOS** — single Swift binary, no Electron, no Python, no 60 Hz redraw loops
@@ -40,7 +40,7 @@ Hover for live 5h / weekly usage — the exact numbers `/usage` would show.
 
 A small black notch-shaped pill, slightly wider than the physical notch:
 
-- 🦀 Coral Claude-style crab on the left (or the Codex mark, when Codex was the latest to update)
+- 🦀 Coral Claude-style crab on the left — or the Codex mark, or the Antigravity sparkle, depending on which agent updated most recently
 - A colored status dot on the right:
   - 🟢 **green** — working (you sent a prompt, agent is generating or running a tool)
   - 🟡 **yellow** — waiting on you (permission prompt or other input)
@@ -48,8 +48,9 @@ A small black notch-shaped pill, slightly wider than the physical notch:
 
 Hover the pill to expand Dynamic-Island-style and reveal:
 
-- **5h block** usage with a 16-segment bar and reset countdown
-- **This week** usage with a 16-segment bar and reset countdown
+- **5h block** usage with a 16-segment bar and reset countdown (Claude & Codex)
+- **This week** usage with a 16-segment bar and reset countdown (Claude & Codex)
+- A status-only row for Antigravity (agent · project · status — Antigravity exposes no quota to chart)
 - Current project + status, with a one-click quit button
 
 <br />
@@ -68,11 +69,11 @@ There are a few notch-style "vibe coding" indicators out there. Here's how Notch
 | Usage numbers | Real `/usage` values via statusline JSON | Estimated, scraped, or absent |
 | Network calls | None | Often polls a vendor API |
 | Reset countdowns | ✅ Exact (from server) | ❌ or approximate |
-| Dual-agent (Claude Code + Codex) | ✅ Both, side by side | Usually one only |
+| Multi-agent (Claude Code + Codex + Antigravity) | ✅ All three, side by side | Usually one only |
 | Notch-shape geometry | Matches Dynamic Island curves | Often a flat rectangle floating below |
 | Auto-hide when idle | ✅ After 10 min, instant wake on hook | Often always-on |
 | Click-through outside pill | ✅ Hit-tested to the visible shape | ❌ Whole bounding box blocks clicks |
-| Install footprint | One `.pkg`, scripts under `~/.claude` & `~/.codex` | App + helper daemons + login items |
+| Install footprint | One `.pkg`, scripts under `~/.claude`, `~/.codex` & `~/.gemini` | App + helper daemons + login items |
 
 The short version: most existing tools are great-looking demos built on web stacks. Notchy is what you'd build if you wanted the same idea to disappear into the OS — quiet, native, and accurate.
 
@@ -97,14 +98,17 @@ Numbers refresh on every statusline render (i.e. while a TUI is active). When no
 
 For Codex, Notchy reads the latest local session `token_count` event that includes `rate_limits`, then writes the same usage format to `~/.codex/notchy/usage`. This gives the Codex row its own 5h and weekly usage bars without network calls.
 
+Antigravity (Gemini CLI / `agy`) is **status-only**: it doesn't expose a 5h/weekly quota anywhere we can read, so its row shows agent · project · status with no usage bars rather than fabricating numbers. If a future Antigravity release surfaces real quota, the same writer pattern slots straight in.
+
 <br />
 
 ## 📦 Requirements
 
 - macOS 14 (Sonoma) or later
 - A MacBook with a notch (M-series 14"/16" Pro, M3 Air, etc.)
-- Claude Code and/or Codex installed
-- `jq` on `PATH` (preinstalled on most dev machines; `brew install jq` if missing)
+- Any of Claude Code, Codex, and/or Antigravity (Gemini CLI) installed
+- `jq` on `PATH` (preinstalled on most dev machines; `brew install jq` if missing) — needed for Claude/Codex live usage
+- `python3` on `PATH` for Codex/Antigravity project-name parsing (optional — status still works without it, just with a blank project)
 - For building from source: Xcode Command Line Tools (`xcode-select --install`)
 
 <br />
@@ -124,9 +128,11 @@ The installer's postinstall script will:
 - Copy the app to `/Applications/Notchy.app`
 - Install scripts to `~/.claude/notchy/` (`play.sh` for status hooks, `statusline.sh` for live usage)
 - Install Codex scripts to `~/.codex/notchy/` (`play.sh` for status hooks, `usage.sh` for live usage)
+- Install the Antigravity script to `~/.gemini/notchy/` (`play.sh` for status hooks)
 - Merge Claude Code hook entries into `~/.claude/settings.json` (existing hooks preserved)
 - Enable Codex lifecycle hooks in `~/.codex/config.toml`
 - Merge Notchy Codex hook entries into `~/.codex/hooks.json`
+- Merge Notchy Antigravity hook entries into `~/.gemini/config/hooks.json` (existing hooks preserved)
 - Append a marked writer block to your existing `~/.claude/statusline-command.sh`, or register a minimal one if you don't have a statusline configured
 - Write a LaunchAgent at `~/Library/LaunchAgents/com.notchy.app.plist`
 - Start the app immediately and on every login
@@ -152,7 +158,7 @@ Outputs:
 
 ## 🔬 How it works
 
-Six pieces:
+Seven pieces:
 
 1. **`play.sh`** — invoked by Claude Code hook events. Reads the hook payload from stdin, writes `<status>\t<unix_ts>\t<project_name>\n` to `~/.claude/state/status`. ~20 ms per invocation.
 
@@ -164,10 +170,12 @@ Six pieces:
 
 5. **`~/.codex/notchy/usage.sh`** — scans recent Codex session JSONL files for the latest `token_count.rate_limits` event and writes `<block_pct>\t<block_reset>\t<weekly_pct>\t<weekly_reset>\n` to `~/.codex/notchy/usage`.
 
-6. **`Notchy.app`** — a long-running native macOS app:
+6. **`~/.gemini/notchy/play.sh`** — invoked by Antigravity (Gemini CLI) hook events. Reads the hook payload from stdin and writes `<status>\t<unix_ts>\t<project_name>\n` to `~/.gemini/notchy/status`. Status-only; no usage file.
+
+7. **`Notchy.app`** — a long-running native macOS app:
    - Floating `NSPanel` over the physical notch, level above the menu bar
    - Notch-shaped pill drawn with a custom `Shape` (top corners 6pt inward, bottom 14pt outward when collapsed, 22pt when expanded — same curves as the iPhone Dynamic Island)
-   - File-watches Claude Code status/usage and Codex status/usage with `DispatchSource.makeFileSystemObjectSource` (kqueue under the hood). Re-renders only when the kernel fires `VNODE_WRITE`.
+   - File-watches Claude Code status/usage, Codex status/usage, and Antigravity status with `DispatchSource.makeFileSystemObjectSource` (kqueue under the hood). Re-renders only when the kernel fires `VNODE_WRITE`.
    - Hover detection constrained to the visible pill shape via `.contentShape(NotchShape(...))`, so transparent areas around the pill don't block clicks to apps below.
    - Spring-animated expansion: ~0.32 s response, 0.78 damping.
    - Auto-expires `waiting` → `idle` after 3 s (see [Caveats](#-caveats)).
@@ -188,6 +196,10 @@ Six pieces:
 | `Notification` | waiting |
 | `PermissionRequest` | waiting |
 
+Codex registers the same set of events in `~/.codex/hooks.json`.
+
+**Antigravity** registers the same events in `~/.gemini/config/hooks.json`, but `agy` only recognizes three of them — `PreToolUse` → working, `PostToolUse` → working, `Stop` → idle. It has no notification/permission hook, so the Antigravity dot goes green while a tool runs and gray when the turn ends, but **never yellow** (see [Caveats](#-caveats)). The extra entries are harmless — `agy` ignores the ones it doesn't know.
+
 <br />
 
 ## ⚠️ Caveats
@@ -198,6 +210,8 @@ Six pieces:
 - **`rate_limits` only appears after the first API response** in a session. Open a fresh TUI without sending anything, and the bars stay on whatever the previous render left.
 - **Hooks load at session start.** After installing (or reconfiguring), restart any running Claude Code session.
 - **Codex hooks require a restart.** Restart any running Codex CLI session after installing or reconfiguring Notchy.
+- **Antigravity has no usage bars and never shows yellow.** `agy` exposes no 5h/weekly quota to read (so the row is status-only), and it fires no notification/permission hook — only `PreToolUse`/`PostToolUse`/`Stop`. The dot is green during tool use and gray when idle; a permission prompt won't turn it yellow because `agy` sends no event for it.
+- **Antigravity hooks require a restart.** Restart any running Antigravity (Gemini CLI) session after installing or reconfiguring Notchy.
 - **Codex prompts you to trust each hook the first time it runs.** Codex stores a `trusted_hash` per hook in `~/.codex/config.toml` and asks for approval the first time it sees a new (or changed) hook command. You'll see one prompt per lifecycle event (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, `Notification`, `PermissionRequest`, etc.) — approve to let Notchy receive status updates. Codex's hook review UI numbers hooks by order (`Hook 1`, `Hook 2`, etc.); Notchy adds `statusMessage` labels to its hook commands, but Codex still controls the row title. Re-running the installer with updated hook metadata will re-prompt because the hash changes.
 - **First-launch Gatekeeper warning.** The `.pkg` isn't notarized — Privacy & Security → "Open Anyway" the first time.
 - **Notch-only.** Older / non-notch displays still get a pill at the top center, but it looks less like a natural notch extension.
@@ -212,11 +226,14 @@ rm -rf /Applications/Notchy.app
 rm -f ~/Library/LaunchAgents/com.notchy.app.plist
 rm -rf ~/.claude/notchy
 rm -rf ~/.codex/notchy
+rm -rf ~/.gemini/notchy
 ```
 
 Then strip the writer block from `~/.claude/statusline-command.sh` (look for the `# notchy-writer-begin` … `# notchy-writer-end` markers) and remove the Notchy hook entries from `~/.claude/settings.json` (they all reference `~/.claude/notchy/play.sh`).
 
 For Codex, remove the Notchy hook entries from `~/.codex/hooks.json` (they reference `~/.codex/notchy/play.sh`). The `hooks = true` setting in `~/.codex/config.toml` can be left enabled if you use other Codex hooks, or removed if Notchy was the only reason it was enabled.
+
+For Antigravity, remove the Notchy hook entries from `~/.gemini/config/hooks.json` (they reference `~/.gemini/notchy/play.sh`).
 
 <br />
 
@@ -241,7 +258,7 @@ For commercial licensing, contact **Robert Wang** at **xwang.robert@gmail.com** 
 
 ## 🙏 Credits
 
-Notch shape geometry and the crab icon concept inspired by [farouqaldori/vibe-notch](https://github.com/farouqaldori/vibe-notch) (Apache 2.0). Codex uses OpenAI's 2025 symbol.
+Notch shape geometry and the crab icon concept inspired by [farouqaldori/vibe-notch](https://github.com/farouqaldori/vibe-notch) (Apache 2.0). Codex uses OpenAI's 2025 symbol; Antigravity is drawn as a static four-point Gemini-style sparkle.
 
 <br />
 

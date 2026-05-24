@@ -33,6 +33,10 @@ CODEX_CONFIG_FILE="$CODEX_DIR/config.toml"
 CODEX_HOOKS_FILE="$CODEX_DIR/hooks.json"
 CODEX_PLAY_SH="$CODEX_NOTCHY_DIR/play.sh"
 CODEX_USAGE_SH="$CODEX_NOTCHY_DIR/usage.sh"
+GEMINI_DIR="$TARGET_HOME/.gemini"
+GEMINI_NOTCHY_DIR="$GEMINI_DIR/notchy"
+GEMINI_HOOKS_FILE="$GEMINI_DIR/config/hooks.json"
+GEMINI_PLAY_SH="$GEMINI_NOTCHY_DIR/play.sh"
 LAUNCH_AGENT_DIR="$TARGET_HOME/Library/LaunchAgents"
 APP_LAUNCH_AGENT="$LAUNCH_AGENT_DIR/com.notchy.app.plist"
 APP_BIN="/Applications/Notchy.app/Contents/MacOS/Notchy"
@@ -43,13 +47,15 @@ LEGACY_TICK_AGENT="$LAUNCH_AGENT_DIR/com.notchy.usage.plist"
 echo "postinstall: target user=$TARGET_USER home=$TARGET_HOME"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-mkdir -p "$NOTCHY_DIR" "$STATE_DIR" "$LAUNCH_AGENT_DIR" "$CLAUDE_DIR" "$CODEX_NOTCHY_DIR"
+mkdir -p "$NOTCHY_DIR" "$STATE_DIR" "$LAUNCH_AGENT_DIR" "$CLAUDE_DIR" "$CODEX_NOTCHY_DIR" "$GEMINI_NOTCHY_DIR"
 cp "$SCRIPT_DIR/play.sh" "$PLAY_SH"
 chmod +x "$PLAY_SH"
 cp "$SCRIPT_DIR/codex-play.sh" "$CODEX_PLAY_SH"
 chmod +x "$CODEX_PLAY_SH"
 cp "$SCRIPT_DIR/codex-usage.sh" "$CODEX_USAGE_SH"
 chmod +x "$CODEX_USAGE_SH"
+cp "$SCRIPT_DIR/gemini-play.sh" "$GEMINI_PLAY_SH"
+chmod +x "$GEMINI_PLAY_SH"
 
 # Minimal standalone statusline script — used when the user has no
 # existing one. It silently writes live rate-limits and prints nothing.
@@ -304,6 +310,58 @@ for event, (arg, status_message) in events.items():
 hooks_path.write_text(json.dumps(data, indent=2) + "\n")
 PYEOF
 
+# --- Merge Antigravity (Gemini CLI) hooks (status colors) ---
+GEMINI_HOOKS_FOR_PY="$GEMINI_HOOKS_FILE" \
+GEMINI_PLAY_FOR_PY="$GEMINI_PLAY_SH" \
+python3 - <<'PYEOF'
+import json, os
+from pathlib import Path
+
+hooks_path = Path(os.environ["GEMINI_HOOKS_FOR_PY"])
+play_sh = os.environ["GEMINI_PLAY_FOR_PY"]
+
+hooks_path.parent.mkdir(parents=True, exist_ok=True)
+
+events = {
+    "SessionStart": ("start", "Notchy: mark Antigravity active"),
+    "UserPromptSubmit": ("working", "Notchy: mark Antigravity working"),
+    "PreToolUse": ("working", "Notchy: mark Antigravity working before tool use"),
+    "PostToolUse": ("working", "Notchy: keep Antigravity marked working after tool use"),
+    "PostToolUseFailure": ("working", "Notchy: keep Antigravity marked working after tool failure"),
+    "Stop": ("complete", "Notchy: mark Antigravity idle"),
+    "StopFailure": ("complete", "Notchy: mark Antigravity idle after failed turn"),
+    "Notification": ("input", "Notchy: mark Antigravity waiting for input"),
+    "PermissionRequest": ("input", "Notchy: mark Antigravity waiting for permission"),
+}
+
+try:
+    data = json.loads(hooks_path.read_text()) if hooks_path.exists() else {}
+except json.JSONDecodeError:
+    data = {}
+
+hooks = data.setdefault("hooks", {})
+
+def is_ours(command):
+    return "/.gemini/notchy/play.sh" in command
+
+for event, (arg, status_message) in events.items():
+    desired = f"{play_sh} {arg}"
+    filtered = []
+    for group in hooks.get(event, []):
+        kept = [h for h in group.get("hooks", []) if not is_ours(h.get("command", ""))]
+        if kept:
+            new_group = {k: v for k, v in group.items() if k != "hooks"}
+            new_group["hooks"] = kept
+            filtered.append(new_group)
+    entry = {"hooks": [{"type": "command", "command": desired, "statusMessage": status_message}]}
+    if event in ("PermissionRequest", "PreToolUse", "PostToolUse", "PostToolUseFailure"):
+        entry["matcher"] = "*"
+    filtered.append(entry)
+    hooks[event] = filtered
+
+hooks_path.write_text(json.dumps(data, indent=2) + "\n")
+PYEOF
+
 # --- LaunchAgent for the app ---
 cat > "$APP_LAUNCH_AGENT" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -325,6 +383,10 @@ chown -R "$TARGET_USER" "$CLAUDE_DIR" "$APP_LAUNCH_AGENT"
 [ -f "$CODEX_CONFIG_FILE" ] && chown "$TARGET_USER" "$CODEX_CONFIG_FILE"
 [ -f "$CODEX_HOOKS_FILE" ] && chown "$TARGET_USER" "$CODEX_HOOKS_FILE"
 [ -d "$CODEX_NOTCHY_DIR" ] && chown -R "$TARGET_USER" "$CODEX_NOTCHY_DIR"
+[ -d "$GEMINI_DIR" ] && chown "$TARGET_USER" "$GEMINI_DIR"
+[ -d "$GEMINI_DIR/config" ] && chown "$TARGET_USER" "$GEMINI_DIR/config"
+[ -f "$GEMINI_HOOKS_FILE" ] && chown "$TARGET_USER" "$GEMINI_HOOKS_FILE"
+[ -d "$GEMINI_NOTCHY_DIR" ] && chown -R "$TARGET_USER" "$GEMINI_NOTCHY_DIR"
 
 UID_NUM="$(id -u "$TARGET_USER")"
 

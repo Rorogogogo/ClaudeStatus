@@ -34,11 +34,19 @@ final class AgentUsageModel: ObservableObject {
     }
 
     private func pollIfChanged() {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
-              let mtime = attrs[.modificationDate] as? Date else { return }
-        if lastMtime != mtime {
-            lastMtime = mtime
-            reload()
+        let filePath = self.path
+        let mtime = self.lastMtime
+        
+        DispatchQueue.global(qos: .background).async { [weak self] in
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: filePath),
+                  let newMtime = attrs[.modificationDate] as? Date else { return }
+            if mtime != newMtime {
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.lastMtime = newMtime
+                    self.reload()
+                }
+            }
         }
     }
 

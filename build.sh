@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-VERSION="1.3.0"
+VERSION="1.4.0"
 IDENTIFIER="com.notchy.app"
 APP_NAME="Notchy"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -96,7 +96,8 @@ cp "$ROOT/scripts/postinstall" "$BUILD/scripts/postinstall"
 cp "$ROOT/play.sh"             "$BUILD/scripts/play.sh"
 cp "$ROOT/codex-play.sh"       "$BUILD/scripts/codex-play.sh"
 cp "$ROOT/codex-usage.sh"      "$BUILD/scripts/codex-usage.sh"
-chmod +x "$BUILD/scripts/postinstall" "$BUILD/scripts/play.sh" "$BUILD/scripts/codex-play.sh" "$BUILD/scripts/codex-usage.sh"
+cp "$ROOT/gemini-play.sh"      "$BUILD/scripts/gemini-play.sh"
+chmod +x "$BUILD/scripts/postinstall" "$BUILD/scripts/play.sh" "$BUILD/scripts/codex-play.sh" "$BUILD/scripts/codex-usage.sh" "$BUILD/scripts/gemini-play.sh"
 
 echo "[5/5] Building .pkg..."
 codesign --force --deep --sign - "$APP_PATH"
