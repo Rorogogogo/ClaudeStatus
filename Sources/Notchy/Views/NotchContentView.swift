@@ -143,9 +143,38 @@ struct NotchContentView: View {
             agentRow(claudeSnapshot, showUsage: true)
             Divider().background(Color.white.opacity(0.12))
             agentRow(codexSnapshot, showUsage: true)
+            Divider().background(Color.white.opacity(0.12))
+            systemRow
             footerControls
                 .padding(.top, 4)
         }
+    }
+
+    private var systemRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "clock")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.6))
+                    .frame(width: 12, height: 12)
+                Text("System")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.82))
+                Spacer()
+                Text(uptimeText)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+            }
+        }
+    }
+
+    private var uptimeText: String {
+        let seconds = Int(ProcessInfo.processInfo.systemUptime)
+        let hours   = seconds / 3600
+        let minutes = (seconds % 3600) / 60
+        if hours >= 24 { return "up \(hours / 24)d \(hours % 24)h" }
+        if hours > 0   { return "up \(hours)h \(minutes)m" }
+        return "up \(minutes)m"
     }
 
     private var footerControls: some View {
