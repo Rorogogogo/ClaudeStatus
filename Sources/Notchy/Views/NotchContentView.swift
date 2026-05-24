@@ -16,6 +16,7 @@ struct NotchContentView: View {
     @ObservedObject var claudeUsage: AgentUsageModel
     @ObservedObject var codexStatus: AgentStatusModel
     @ObservedObject var codexUsage: AgentUsageModel
+    @ObservedObject var antigravityStatus: AgentStatusModel
     @StateObject private var repoStats = GitHubRepoStatsModel()
     let collapsedSize: CGSize
     let expandedSize: CGSize
@@ -45,8 +46,20 @@ struct NotchContentView: View {
         )
     }
 
+    private var antigravitySnapshot: AgentSnapshot {
+        AgentSnapshot(
+            kind: .antigravity,
+            name: "Antigravity",
+            status: effectiveStatus(for: antigravityStatus),
+            project: antigravityStatus.project,
+            lastEventTs: antigravityStatus.lastEventTs,
+            usage: nil
+        )
+    }
+
     private var activeSnapshot: AgentSnapshot {
-        codexSnapshot.lastEventTs > claudeSnapshot.lastEventTs ? codexSnapshot : claudeSnapshot
+        [claudeSnapshot, codexSnapshot, antigravitySnapshot]
+            .max { $0.lastEventTs < $1.lastEventTs } ?? claudeSnapshot
     }
 
     private func effectiveStatus(for model: AgentStatusModel) -> String {
@@ -111,10 +124,10 @@ struct NotchContentView: View {
                 // expanded uses 22pt to line up with the detail rows below.
                 HStack(spacing: 0) {
                     Spacer().frame(width: hovering ? 22 : 14)
-                    if activeSnapshot.kind == .claude {
-                        ClaudeCrabIcon(size: 14)
-                    } else {
-                        CodexMark(size: 15)
+                    switch activeSnapshot.kind {
+                    case .claude:      ClaudeCrabIcon(size: 14)
+                    case .codex:       CodexMark(size: 15)
+                    case .antigravity: AntigravityMark(size: 14)
                     }
                     Spacer(minLength: 0)
                     Circle()
@@ -142,6 +155,8 @@ struct NotchContentView: View {
             agentRow(claudeSnapshot, showUsage: true)
             Divider().background(Color.white.opacity(0.12))
             agentRow(codexSnapshot, showUsage: true)
+            Divider().background(Color.white.opacity(0.12))
+            agentRow(antigravitySnapshot, showUsage: false)
             footerControls
                 .padding(.top, 4)
         }
@@ -252,10 +267,10 @@ struct NotchContentView: View {
     private func agentRow(_ snapshot: AgentSnapshot, showUsage: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                if snapshot.kind == .claude {
-                    ClaudeCrabIcon(size: 12)
-                } else {
-                    CodexMark(size: 13)
+                switch snapshot.kind {
+                case .claude:      ClaudeCrabIcon(size: 12)
+                case .codex:       CodexMark(size: 13)
+                case .antigravity: AntigravityMark(size: 12)
                 }
                 Text(snapshot.name)
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
