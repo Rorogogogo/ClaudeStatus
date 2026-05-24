@@ -6,6 +6,11 @@ struct NotchShape: Shape {
     var topCornerRadius: CGFloat = 6
     var bottomCornerRadius: CGFloat = 14
 
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(topCornerRadius, bottomCornerRadius) }
+        set { topCornerRadius = newValue.first; bottomCornerRadius = newValue.second }
+    }
+
     func path(in rect: CGRect) -> Path {
         var path = Path()
         path.move(to: CGPoint(x: rect.minX, y: rect.minY))

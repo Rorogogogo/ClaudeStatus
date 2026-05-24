@@ -93,6 +93,7 @@ struct NotchContentView: View {
             pillView
                 .frame(width: currentSize.width, height: currentSize.height)
                 .allowsHitTesting(hovering)
+                .modifier(AntigravityModifier(enabled: !hovering))
         }
         .frame(width: expandedSize.width, height: expandedSize.height, alignment: .top)
         .animation(.spring(response: 0.32, dampingFraction: 0.78), value: hovering)
@@ -293,5 +294,35 @@ struct NotchContentView: View {
                     .monospacedDigit()
             }
         }
+    }
+}
+
+// MARK: - Antigravity floating modifier
+//
+// Uses SwiftUI's withAnimation(.repeatForever) which is backed by Core Animation
+// and runs entirely on the render thread — no timer callbacks, no body re-evals
+// per frame. A naive Timer-based implementation would fire at 60 fps and force
+// SwiftUI to re-diff the entire pill hierarchy on every frame, causing visible jank.
+//
+// When hovering starts the float is cancelled with a matching spring so the
+// transition into the expanded state feels seamless.
+private struct AntigravityModifier: ViewModifier {
+    var enabled: Bool
+    @State private var floatOffset: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .offset(y: floatOffset)
+            .onChange(of: enabled, initial: true) { _, isEnabled in
+                if isEnabled {
+                    withAnimation(.easeInOut(duration: 2.5).repeatForever(autoreverses: true)) {
+                        floatOffset = 3
+                    }
+                } else {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                        floatOffset = 0
+                    }
+                }
+            }
     }
 }
